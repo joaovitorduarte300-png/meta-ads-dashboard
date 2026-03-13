@@ -7,12 +7,14 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 def _load_logo():
-    path = os.path.join(os.path.dirname(__file__), "logo.png")
-    try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except Exception:
-        return None
+    for name in ["logo.png", "logo.png.png"]:
+        path = os.path.join(os.path.dirname(__file__), name)
+        try:
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        except Exception:
+            continue
+    return None
 
 _LOGO_B64 = _load_logo()
 
