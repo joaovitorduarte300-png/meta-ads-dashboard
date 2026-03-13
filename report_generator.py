@@ -4,7 +4,12 @@ Executado toda segunda-feira às 08h ou sob demanda.
 """
 import sys, io, json, os, datetime, requests
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+# Fix de encoding apenas fora do Streamlit Cloud
+try:
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 ACCESS_TOKEN = "EAAW8pPurJVQBQ5ghAlBe4pEbcbvhlo3oz7VuGsJQOJcLxCKQWsDB1PhZCFrv1sp4FZCG74OE2JdfzYxDaXDfBdsZBgYVzqVPrOG7CymhLtzgD0dClyPEHO4s7H91rQlZB36gfCFHymot1QA3z3JQijNZB43Vf9t3vAqYi1ldNNHZBa2LFsUMLfy2Wx6iDZAhaGFLj7RLl9XoAZDZD"
 BASE_URL   = "https://graph.facebook.com/v21.0"
