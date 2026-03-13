@@ -22,7 +22,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
-from report_generator import load_report
+from report_generator import fetch_report, load_report
 
 st.set_page_config(
     page_title="Relatório de Performance",
@@ -197,8 +197,27 @@ with st.sidebar:
 
 
 # ─── Carregar dados ──────────────────────────────────────────────────────────
+def _cache_is_stale(data):
+    """Retorna True se o cache estiver desatualizado ou com campos faltando."""
+    if not data or not data.get("contas"):
+        return True
+    primeira = data["contas"][0]
+    totais = primeira.get("totais", {})
+    # Verifica se campos essenciais estão presentes
+    if "impressoes" not in totais:
+        return True
+    if not primeira.get("criativos"):
+        return True
+    return False
+
 if "report" not in st.session_state:
     cached = load_report()
+    if _cache_is_stale(cached):
+        with st.spinner("🔄 Atualizando dados, aguarde..."):
+            try:
+                cached = fetch_report()
+            except Exception as e:
+                cached = None
     if cached:
         st.session_state["report"] = cached
     else:
