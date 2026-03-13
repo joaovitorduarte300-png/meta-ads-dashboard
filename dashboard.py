@@ -173,7 +173,8 @@ def build_context(report, idx):
         )
     criativos = c.get("criativos", [])
     if criativos:
-        lines.append("", "Top criativos:")
+        lines.append("")
+        lines.append("Top criativos:")
         for cr in sorted(criativos, key=lambda x: x.get("gasto",0), reverse=True)[:5]:
             lines.append(
                 f"  {cr.get('ad_name','')} | Gasto={BRL(cr['gasto'])} "
