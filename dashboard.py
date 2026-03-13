@@ -2,9 +2,19 @@
 Meta Ads Dashboard — Streamlit
 Relatório interativo com chat IA (Claude) para análise de campanhas.
 """
-import json, os, datetime
+import json, os, datetime, base64
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+def _load_logo():
+    path = os.path.join(os.path.dirname(__file__), "logo.png")
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return None
+
+_LOGO_B64 = _load_logo()
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -186,12 +196,20 @@ def build_context(report, idx):
 
 # ─── Sidebar ────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("""
-    <div style='text-align:center;padding:12px 0 4px'>
-      <span style='font-size:32px'>📊</span><br>
-      <span style='font-size:16px;font-weight:700;color:#f1f5f9'>Meta Ads</span><br>
-      <span style='font-size:12px;color:#475569'>Dashboard</span>
-    </div>""", unsafe_allow_html=True)
+    if _LOGO_B64:
+        st.markdown(f"""
+        <div style='text-align:center;padding:16px 0 8px'>
+          <img src="data:image/png;base64,{_LOGO_B64}"
+               style="width:150px;filter:brightness(0) invert(1);margin-bottom:6px" />
+          <div style='font-size:12px;color:#475569;margin-top:4px'>Meta Ads Dashboard</div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style='text-align:center;padding:12px 0 4px'>
+          <span style='font-size:32px'>📊</span><br>
+          <span style='font-size:16px;font-weight:700;color:#f1f5f9'>Meta Ads</span><br>
+          <span style='font-size:12px;color:#475569'>Dashboard</span>
+        </div>""", unsafe_allow_html=True)
     st.markdown("---")
 
     preset_label = st.selectbox("📅 Período", list(PRESETS.keys()), index=2)
