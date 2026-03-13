@@ -544,6 +544,14 @@ else:
                           <span class="cm-value {roas_cls}">{roas_cr:.2f}x</span>
                         </div>
                         <div class="creative-metric">
+                          <span class="cm-label">💬 Conv. Mensagem</span>
+                          <span class="cm-value">{int(cr.get('conv_mensagens',0))}</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">💸 Custo/Mensagem</span>
+                          <span class="cm-value">{BRL(cr.get('custo_por_mensagem',0)) if cr.get('custo_por_mensagem',0)>0 else "—"}</span>
+                        </div>
+                        <div class="creative-metric">
                           <span class="cm-label">💰 Receita</span>
                           <span class="cm-value green">{BRL(cr['receita'])}</span>
                         </div>
@@ -554,15 +562,16 @@ else:
         cols_cr = {
             "ad_name":"Anúncio","campaign_name":"Campanha",
             "impressoes":"Impressões","cliques_link":"Cliques","ctr":"CTR %",
-            "frequencia":"Freq.","compras":"Compras","custo_por_compra":"$/Compra",
+            "frequencia":"Freq.","conv_mensagens":"Conv.Msg","custo_por_mensagem":"$/Msg",
+            "compras":"Compras","custo_por_compra":"$/Compra",
             "receita":"Receita","gasto":"Gasto","roas":"ROAS",
         }
         existing_cr = [c for c in cols_cr if c in df_cr_f.columns]
         df_cr_tbl   = df_cr_f[existing_cr].rename(columns=cols_cr)
         fmt_cr = {}
-        for c in ["Gasto","Receita","$/Compra"]:
+        for c in ["Gasto","Receita","$/Compra","$/Msg"]:
             if c in df_cr_tbl.columns: fmt_cr[c]="R$ {:,.2f}"
-        for c in ["Impressões","Cliques","Compras"]:
+        for c in ["Impressões","Cliques","Compras","Conv.Msg"]:
             if c in df_cr_tbl.columns: fmt_cr[c]="{:,.0f}"
         if "ROAS"  in df_cr_tbl.columns: fmt_cr["ROAS"] ="{:.2f}x"
         if "Freq." in df_cr_tbl.columns: fmt_cr["Freq."]="{:.2f}"
