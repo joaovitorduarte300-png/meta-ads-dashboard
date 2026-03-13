@@ -4,7 +4,7 @@ Executado toda segunda-feira às 08h ou sob demanda.
 """
 import sys, json, os, datetime, requests
 
-ACCESS_TOKEN = "EAAW8pPurJVQBQ5ghAlBe4pEbcbvhlo3oz7VuGsJQOJcLxCKQWsDB1PhZCFrv1sp4FZCG74OE2JdfzYxDaXDfBdsZBgYVzqVPrOG7CymhLtzgD0dClyPEHO4s7H91rQlZB36gfCFHymot1QA3z3JQijNZB43Vf9t3vAqYi1ldNNHZBa2LFsUMLfy2Wx6iDZAhaGFLj7RLl9XoAZDZD"
+ACCESS_TOKEN = "EAAW8pPurJVQBQ3R8HmC4cxtky6mZCcCt5IX3xz9XD5TZCxLXqwPZC3PsBoFLjOiRZCWqvkNgK3AHvgtZAatTxbcYPYZC0mGEB2Q35bQ5O1BLNA4Rt6ZAEf711FLxjIzhXmUCWRmEwhgHo2mb0AVBVuHpWRrZCGAqEWlQZCZATBzJ2UnsQRvsn1ChVmEQZBhowrkZBDOHeuZB5YZCrDSQZDZD"
 BASE_URL   = "https://graph.facebook.com/v21.0"
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "report_cache.json")
 

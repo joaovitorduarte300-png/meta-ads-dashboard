@@ -212,13 +212,19 @@ def _cache_is_stale(data):
 
 if "report" not in st.session_state:
     cached = load_report()
+    fallback = cached  # guarda o cache antigo como fallback
     if _cache_is_stale(cached):
         with st.spinner("🔄 Atualizando dados, aguarde..."):
             try:
-                cached = fetch_report()
-            except Exception as e:
-                cached = None
-    if cached:
+                novo = fetch_report()
+                # só usa o novo se tiver contas válidas
+                if novo and novo.get("contas"):
+                    cached = novo
+                else:
+                    cached = fallback  # volta para o cache antigo
+            except Exception:
+                cached = fallback  # volta para o cache antigo em caso de erro
+    if cached and cached.get("contas"):
         st.session_state["report"] = cached
     else:
         st.markdown("""
