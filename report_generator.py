@@ -2,14 +2,7 @@
 Gerador de relatórios Meta Ads — busca dados e salva JSON/cache para o dashboard.
 Executado toda segunda-feira às 08h ou sob demanda.
 """
-import sys, io, json, os, datetime, requests
-
-# Fix de encoding apenas fora do Streamlit Cloud
-try:
-    if hasattr(sys.stdout, "buffer"):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-except Exception:
-    pass
+import sys, json, os, datetime, requests
 
 ACCESS_TOKEN = "EAAW8pPurJVQBQ5ghAlBe4pEbcbvhlo3oz7VuGsJQOJcLxCKQWsDB1PhZCFrv1sp4FZCG74OE2JdfzYxDaXDfBdsZBgYVzqVPrOG7CymhLtzgD0dClyPEHO4s7H91rQlZB36gfCFHymot1QA3z3JQijNZB43Vf9t3vAqYi1ldNNHZBa2LFsUMLfy2Wx6iDZAhaGFLj7RLl9XoAZDZD"
 BASE_URL   = "https://graph.facebook.com/v21.0"
@@ -132,13 +125,10 @@ def _fetch_ad_creatives(aid):
 
 
 def fetch_report(date_preset="last_7d"):
-    print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M}] Gerando relatorio ({date_preset})...")
-
     accounts_raw = _get_all("me/adaccounts", {
         "fields": "id,name,account_status,currency,amount_spent,balance"
     })
     accounts = [a for a in accounts_raw if a.get("account_status") == 1]
-    print(f"  {len(accounts)} conta(s) ativa(s)")
 
     report = {
         "gerado_em":   datetime.datetime.now().isoformat(),
@@ -149,7 +139,6 @@ def fetch_report(date_preset="last_7d"):
     for acc in accounts:
         aid  = acc["id"]
         nome = acc["name"]
-        print(f"  Processando: {nome}")
 
         # ── Insights por campanha ─────────────────────────────────────────
         camp_insights = _get(f"{aid}/insights", {
@@ -257,7 +246,6 @@ def fetch_report(date_preset="last_7d"):
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
-    print(f"Relatorio salvo: {CACHE_FILE}")
     return report
 
 
