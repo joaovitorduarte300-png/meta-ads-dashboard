@@ -253,7 +253,7 @@ with st.sidebar:
 
 
 # ─── Pré-busca em background dos períodos mais usados ────────────────────────
-_PREFETCH = ["last_14d", "last_30d", "this_month"]
+_PREFETCH = ["today", "yesterday", "last_14d", "last_30d", "this_month", "last_month", "maximum"]
 
 def _bg_prefetch(presets):
     """Roda em thread separada — NÃO acessa st.session_state."""
