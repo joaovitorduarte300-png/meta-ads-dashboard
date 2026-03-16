@@ -197,45 +197,47 @@ with st.sidebar:
 
 
 # ─── Carregar dados ──────────────────────────────────────────────────────────
+preset_key = PRESETS[preset_label]
+report_session_key = f"report_{preset_key}"
+
 def _cache_is_stale(data):
-    """Retorna True se o cache estiver desatualizado ou com campos faltando."""
     if not data or not data.get("contas"):
         return True
     primeira = data["contas"][0]
     totais = primeira.get("totais", {})
-    # Verifica se campos essenciais estão presentes
     if "impressoes" not in totais:
         return True
     if not primeira.get("criativos"):
         return True
     return False
 
-if "report" not in st.session_state:
+if report_session_key not in st.session_state:
     cached = load_report()
-    fallback = cached  # guarda o cache antigo como fallback
-    if _cache_is_stale(cached):
-        with st.spinner("🔄 Atualizando dados, aguarde..."):
-            try:
-                novo = fetch_report()
-                # só usa o novo se tiver contas válidas
-                if novo and novo.get("contas"):
-                    cached = novo
-                else:
-                    cached = fallback  # volta para o cache antigo
-            except Exception:
-                cached = fallback  # volta para o cache antigo em caso de erro
-    if cached and cached.get("contas"):
-        st.session_state["report"] = cached
+    # Usa o cache do disco se o período coincidir e não estiver stale
+    if cached and cached.get("date_preset") == preset_key and not _cache_is_stale(cached):
+        st.session_state[report_session_key] = cached
     else:
-        st.markdown("""
-        <div style='text-align:center;padding:60px 20px'>
-          <span style='font-size:48px'>📡</span>
-          <h3 style='color:#64748b;margin-top:16px'>Dados não disponíveis</h3>
-          <p style='color:#475569'>O relatório ainda não foi gerado. Tente novamente mais tarde.</p>
-        </div>""", unsafe_allow_html=True)
-        st.stop()
+        with st.spinner(f"🔄 Carregando dados para '{preset_label}'..."):
+            try:
+                novo = fetch_report(preset_key)
+                if novo and novo.get("contas"):
+                    st.session_state[report_session_key] = novo
+                elif cached and cached.get("contas"):
+                    st.session_state[report_session_key] = cached
+            except Exception:
+                if cached and cached.get("contas"):
+                    st.session_state[report_session_key] = cached
 
-report = st.session_state["report"]
+if report_session_key not in st.session_state:
+    st.markdown("""
+    <div style='text-align:center;padding:60px 20px'>
+      <span style='font-size:48px'>📡</span>
+      <h3 style='color:#64748b;margin-top:16px'>Dados não disponíveis</h3>
+      <p style='color:#475569'>O relatório ainda não foi gerado. Tente novamente mais tarde.</p>
+    </div>""", unsafe_allow_html=True)
+    st.stop()
+
+report = st.session_state[report_session_key]
 if not report or not report.get("contas"):
     st.warning("Nenhuma conta com dados.")
     st.stop()
