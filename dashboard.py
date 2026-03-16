@@ -256,16 +256,15 @@ with st.sidebar:
 _PREFETCH = ["last_14d", "last_30d", "this_month"]
 
 def _bg_prefetch(presets):
+    """Roda em thread separada — NÃO acessa st.session_state."""
     for p in presets:
-        key = f"report_{p}"
-        if key not in st.session_state:
-            cached = load_report(p)
-            if cached and cached.get("contas") and _cache_is_fresh(cached):
-                continue  # já tem cache fresco no disco, não precisa buscar
-            try:
-                fetch_report(p)
-            except Exception:
-                pass
+        cached = load_report(p)
+        if cached and cached.get("contas") and _cache_is_fresh(cached):
+            continue  # cache fresco no disco, pula
+        try:
+            fetch_report(p)
+        except Exception:
+            pass
 
 if "prefetch_started" not in st.session_state:
     st.session_state["prefetch_started"] = True
@@ -277,19 +276,18 @@ report_session_key = f"report_{date_preset}"
 
 if report_session_key not in st.session_state:
     cached = load_report(date_preset)  # tenta cache do período específico
-    if cached and cached.get("contas") and _cache_is_fresh(cached):
+    if cached and cached.get("contas"):
+        # Usa o cache (mesmo que antigo) — mostra os dados imediatamente
         st.session_state[report_session_key] = cached
     else:
+        # Sem cache para este período → busca da API
         with st.spinner(f"🔄 Carregando dados para '{preset_label}'..."):
             try:
                 novo = fetch_report(date_preset)
                 if novo and novo.get("contas"):
                     st.session_state[report_session_key] = novo
-                elif cached and cached.get("contas"):
-                    st.session_state[report_session_key] = cached
             except Exception:
-                if cached and cached.get("contas"):
-                    st.session_state[report_session_key] = cached
+                pass
 
 if report_session_key not in st.session_state:
     st.markdown("""
