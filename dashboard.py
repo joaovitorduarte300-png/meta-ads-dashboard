@@ -2,7 +2,7 @@
 Meta Ads Dashboard — Streamlit
 Relatório interativo com chat IA (Claude) para análise de campanhas.
 """
-import json, os, datetime, base64
+import json, os, datetime, base64, threading
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -123,6 +123,17 @@ section[data-testid="stSidebar"] {
 BRL = lambda v: f"R$ {v:,.2f}"
 NUM = lambda v: f"{int(v):,}"
 
+CACHE_MAX_AGE_H = 6  # horas antes de considerar o cache expirado
+
+def _cache_is_fresh(data):
+    """Retorna True se o cache foi gerado há menos de CACHE_MAX_AGE_H horas."""
+    try:
+        age = (datetime.datetime.now() -
+               datetime.datetime.fromisoformat(data.get("gerado_em", ""))).total_seconds()
+        return age < CACHE_MAX_AGE_H * 3600
+    except Exception:
+        return False
+
 PRESETS = {
     "Hoje":           "today",
     "Ontem":          "yesterday",
@@ -241,12 +252,32 @@ with st.sidebar:
     st.caption(f"🕒 {datetime.datetime.now():%d/%m/%Y %H:%M}")
 
 
+# ─── Pré-busca em background dos períodos mais usados ────────────────────────
+_PREFETCH = ["last_14d", "last_30d", "this_month"]
+
+def _bg_prefetch(presets):
+    for p in presets:
+        key = f"report_{p}"
+        if key not in st.session_state:
+            cached = load_report(p)
+            if cached and cached.get("contas") and _cache_is_fresh(cached):
+                continue  # já tem cache fresco no disco, não precisa buscar
+            try:
+                fetch_report(p)
+            except Exception:
+                pass
+
+if "prefetch_started" not in st.session_state:
+    st.session_state["prefetch_started"] = True
+    threading.Thread(target=_bg_prefetch, args=(_PREFETCH,), daemon=True).start()
+
+
 # ─── Carregar dados ──────────────────────────────────────────────────────────
 report_session_key = f"report_{date_preset}"
 
 if report_session_key not in st.session_state:
-    cached = load_report()
-    if cached and cached.get("date_preset") == date_preset and cached.get("contas"):
+    cached = load_report(date_preset)  # tenta cache do período específico
+    if cached and cached.get("contas") and _cache_is_fresh(cached):
         st.session_state[report_session_key] = cached
     else:
         with st.spinner(f"🔄 Carregando dados para '{preset_label}'..."):

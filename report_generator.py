@@ -7,7 +7,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ACCESS_TOKEN = "EAAW8pPurJVQBQ5xd4AVeZBanXVxrVOhPYQCTH4p77P3d41RHBWZCRVopA3WhGbpqesokkGhNlXTZBZA3vexc4SF9Ol93IluKegPV7ZCTa0xaADMuX33wCWNCjlNoDC7sTVPeRgQzZBpAynKZBZANEpBeOXhTyMZCZCW4ZAzmMaluzHT2UG7INA939CPYx0xqYHtz0mcr3sYpZA03j6k7GgZDZD"
 BASE_URL   = "https://graph.facebook.com/v21.0"
-CACHE_FILE = os.path.join(os.path.dirname(__file__), "report_cache.json")
+_CACHE_DIR  = os.path.dirname(__file__)
+CACHE_FILE  = os.path.join(_CACHE_DIR, "report_cache.json")  # mantido para compatibilidade
+
+def _cache_path(preset):
+    return os.path.join(_CACHE_DIR, f"report_cache_{preset}.json")
 
 INSIGHT_FIELDS = (
     "reach,impressions,frequency,inline_link_clicks,spend,"
@@ -375,16 +379,33 @@ def fetch_report(date_preset="last_7d"):
         "contas":      contas,
     }
 
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+    # Salva cache por período E o cache principal (last_7d)
+    per_period_path = _cache_path(date_preset)
+    with open(per_period_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
+    if date_preset == "last_7d":
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
 
     return report
 
 
-def load_report():
+def load_report(preset=None):
+    """Carrega cache do disco. Se `preset` for fornecido, tenta o cache do período primeiro."""
+    if preset:
+        path = _cache_path(preset)
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
     if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
     return None
 
 

@@ -2,7 +2,7 @@
 Meta Ads Dashboard — Visão do Cliente
 Versão simplificada sem dados internos. Acesso por URL com parâmetro ?conta=NOME_DA_CONTA
 """
-import json, os, datetime, base64
+import json, os, datetime, base64, threading
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -115,6 +115,16 @@ section[data-testid="stSidebar"] {
 BRL = lambda v: f"R$ {v:,.2f}"
 NUM = lambda v: f"{int(v):,}"
 
+CACHE_MAX_AGE_H = 6
+
+def _cache_is_fresh(data):
+    try:
+        age = (datetime.datetime.now() -
+               datetime.datetime.fromisoformat(data.get("gerado_em", ""))).total_seconds()
+        return age < CACHE_MAX_AGE_H * 3600
+    except Exception:
+        return False
+
 PRESETS = {
     "Hoje":           "today",
     "Ontem":          "yesterday",
@@ -196,25 +206,31 @@ with st.sidebar:
     st.caption(f"🕒 {datetime.datetime.now():%d/%m/%Y %H:%M}")
 
 
+# ─── Pré-busca em background dos períodos mais usados ────────────────────────
+_PREFETCH = ["last_14d", "last_30d", "this_month"]
+
+def _bg_prefetch(presets):
+    for p in presets:
+        cached = load_report(p)
+        if cached and cached.get("contas") and _cache_is_fresh(cached):
+            continue
+        try:
+            fetch_report(p)
+        except Exception:
+            pass
+
+if "prefetch_started" not in st.session_state:
+    st.session_state["prefetch_started"] = True
+    threading.Thread(target=_bg_prefetch, args=(_PREFETCH,), daemon=True).start()
+
+
 # ─── Carregar dados ──────────────────────────────────────────────────────────
 preset_key = PRESETS[preset_label]
 report_session_key = f"report_{preset_key}"
 
-def _cache_is_stale(data):
-    if not data or not data.get("contas"):
-        return True
-    primeira = data["contas"][0]
-    totais = primeira.get("totais", {})
-    if "impressoes" not in totais:
-        return True
-    if not primeira.get("criativos"):
-        return True
-    return False
-
 if report_session_key not in st.session_state:
-    cached = load_report()
-    # Usa o cache do disco se o período coincidir e não estiver stale
-    if cached and cached.get("date_preset") == preset_key and not _cache_is_stale(cached):
+    cached = load_report(preset_key)  # tenta cache do período específico
+    if cached and cached.get("contas") and _cache_is_fresh(cached):
         st.session_state[report_session_key] = cached
     else:
         with st.spinner(f"🔄 Carregando dados para '{preset_label}'..."):
