@@ -283,11 +283,26 @@ def fetch_report(date_preset="last_7d"):
         # ── Instagram Orgânico ────────────────────────────────────────────
         ig_organic = None
         try:
-            ig_accs = _get_all(f"{aid}/connected_instagram_accounts", {
-                "fields": "id,username,name"
-            })
+            ig_id = None
+            # Método 1: contas IG conectadas diretamente à conta de anúncios
+            ig_accs = _get_all(f"{aid}/connected_instagram_accounts", {"fields": "id,username,name"})
             if ig_accs:
-                ig_organic = _fetch_instagram_organic(ig_accs[0]["id"], date_preset)
+                ig_id = ig_accs[0]["id"]
+
+            # Método 2: via Business Manager da conta de anúncios
+            if not ig_id:
+                acc_info = _get(aid, {"fields": "business"})
+                biz = acc_info.get("business", {})
+                biz_id = biz.get("id") if biz else None
+                if biz_id:
+                    ig_biz = _get_all(f"{biz_id}/instagram_business_accounts", {
+                        "fields": "id,username,name"
+                    })
+                    if ig_biz:
+                        ig_id = ig_biz[0]["id"]
+
+            if ig_id:
+                ig_organic = _fetch_instagram_organic(ig_id, date_preset)
         except Exception:
             ig_organic = None
 
