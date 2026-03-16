@@ -391,15 +391,22 @@ def fetch_report(date_preset="last_7d"):
 
 
 def load_report(preset=None):
-    """Carrega cache do disco. Se `preset` for fornecido, tenta o cache do período primeiro."""
+    """Carrega cache do disco.
+    Se `preset` for fornecido, retorna APENAS o cache daquele período (ou None).
+    Sem preset, retorna o cache principal (last_7d).
+    """
     if preset:
         path = _cache_path(preset)
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Garante que o arquivo é realmente do período certo
+                    if data.get("date_preset") == preset:
+                        return data
             except Exception:
                 pass
+        return None  # Não faz fallback — evita mostrar dados do período errado
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
