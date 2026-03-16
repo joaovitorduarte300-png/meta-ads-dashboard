@@ -3,6 +3,7 @@ Gerador de relatórios Meta Ads — busca dados e salva JSON/cache para o dashbo
 Executado toda segunda-feira às 08h ou sob demanda.
 """
 import sys, json, os, datetime, requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ACCESS_TOKEN = "EAAW8pPurJVQBQ5xd4AVeZBanXVxrVOhPYQCTH4p77P3d41RHBWZCRVopA3WhGbpqesokkGhNlXTZBZA3vexc4SF9Ol93IluKegPV7ZCTa0xaADMuX33wCWNCjlNoDC7sTVPeRgQzZBpAynKZBZANEpBeOXhTyMZCZCW4ZAzmMaluzHT2UG7INA939CPYx0xqYHtz0mcr3sYpZA03j6k7GgZDZD"
 BASE_URL   = "https://graph.facebook.com/v21.0"
@@ -138,27 +139,55 @@ def _ig_date_range(date_preset):
 
 
 def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
-    """Busca dados orgânicos do Instagram: perfil, insights, mídia."""
+    """Busca dados orgânicos do Instagram: perfil, insights, mídia — em paralelo."""
     try:
-        profile = _get(ig_user_id, {
-            "fields": "followers_count,media_count,name,username,profile_picture_url,biography"
-        })
-        if "error" in profile or "followers_count" not in profile:
-            return None
-
         since, until, days = _ig_date_range(date_preset)
 
-        # Insights da conta (reach, impressions, profile_views, follower_count)
-        try:
-            ins_raw = _get(f"{ig_user_id}/insights", {
-                "metric": "reach,impressions,profile_views,follower_count",
-                "period": "day",
-                "since": since,
-                "until": until,
+        def _get_profile():
+            return _get(ig_user_id, {
+                "fields": "followers_count,media_count,name,username,profile_picture_url,biography"
             })
-            ai_data = ins_raw.get("data", [])
-        except Exception:
-            ai_data = []
+
+        def _get_insights():
+            try:
+                r = _get(f"{ig_user_id}/insights", {
+                    "metric": "reach,impressions,profile_views,follower_count",
+                    "period": "day", "since": since, "until": until,
+                })
+                return r.get("data", [])
+            except Exception:
+                return []
+
+        def _get_media():
+            try:
+                return _get_all(f"{ig_user_id}/media", {
+                    "fields": "id,media_type,timestamp,like_count,comments_count,"
+                              "thumbnail_url,media_url,permalink,caption",
+                    "limit": 50,
+                })
+            except Exception:
+                return []
+
+        def _get_stories():
+            try:
+                return _get_all(f"{ig_user_id}/stories", {
+                    "fields": "id,media_type,timestamp,thumbnail_url,media_url",
+                })
+            except Exception:
+                return []
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            f_profile  = ex.submit(_get_profile)
+            f_insights = ex.submit(_get_insights)
+            f_media    = ex.submit(_get_media)
+            f_stories  = ex.submit(_get_stories)
+            profile   = f_profile.result()
+            ai_data   = f_insights.result()
+            media_raw = f_media.result()
+            stories   = f_stories.result()
+
+        if "error" in profile or "followers_count" not in profile:
+            return None
 
         def _sum_ig(name):
             item = next((i for i in ai_data if i.get("name") == name), None)
@@ -171,22 +200,10 @@ def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
             if len(vals) >= 2:
                 follower_delta = vals[-1].get("value", 0) - vals[0].get("value", 0)
 
-        # Lista de mídias
-        try:
-            media_raw = _get_all(f"{ig_user_id}/media", {
-                "fields": "id,media_type,timestamp,like_count,comments_count,"
-                          "thumbnail_url,media_url,permalink,caption",
-                "limit": 50,
-            })
-        except Exception:
-            media_raw = []
-
         for m in media_raw:
             m["engagement"] = (m.get("like_count") or 0) + (m.get("comments_count") or 0)
-
         media_sorted = sorted(media_raw, key=lambda x: x.get("engagement", 0), reverse=True)
 
-        # Contar posts no período
         since_dt = datetime.datetime.now() - datetime.timedelta(days=days)
         posts_periodo = 0
         for m in media_raw:
@@ -199,17 +216,9 @@ def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
             except Exception:
                 pass
 
-        reels    = [m for m in media_sorted if m.get("media_type") == "VIDEO"][:10]
-        posts    = [m for m in media_sorted if m.get("media_type") == "IMAGE"][:10]
+        reels     = [m for m in media_sorted if m.get("media_type") == "VIDEO"][:10]
+        posts     = [m for m in media_sorted if m.get("media_type") == "IMAGE"][:10]
         carroseis = [m for m in media_sorted if m.get("media_type") == "CAROUSEL_ALBUM"][:10]
-
-        # Stories (apenas últimas 24h)
-        try:
-            stories = _get_all(f"{ig_user_id}/stories", {
-                "fields": "id,media_type,timestamp,thumbnail_url,media_url",
-            })
-        except Exception:
-            stories = []
 
         return {
             "ig_user_id":           ig_user_id,
@@ -234,151 +243,137 @@ def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
         return None
 
 
+def _fetch_ig_for_account(aid, date_preset):
+    """Descobre a conta Instagram ligada ao ad account e busca dados orgânicos."""
+    try:
+        ig_id = None
+        ig_accs = _get_all(f"{aid}/connected_instagram_accounts", {"fields": "id,username,name"})
+        if ig_accs:
+            ig_id = ig_accs[0]["id"]
+        if not ig_id:
+            acc_info = _get(aid, {"fields": "business"})
+            biz = acc_info.get("business", {})
+            biz_id = biz.get("id") if biz else None
+            if biz_id:
+                ig_biz = _get_all(f"{biz_id}/instagram_business_accounts", {"fields": "id,username,name"})
+                if ig_biz:
+                    ig_id = ig_biz[0]["id"]
+        return _fetch_instagram_organic(ig_id, date_preset) if ig_id else None
+    except Exception:
+        return None
+
+
+def _fetch_account(acc, date_preset):
+    """Busca todos os dados de uma única conta de anúncios — paralelizado internamente."""
+    aid  = acc["id"]
+    nome = acc["name"]
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        f_camp      = ex.submit(_get, f"{aid}/insights", {
+            "fields": INSIGHT_FIELDS, "date_preset": date_preset, "level": "campaign"})
+        f_adset     = ex.submit(_get, f"{aid}/insights", {
+            "fields": INSIGHT_FIELDS, "date_preset": date_preset, "level": "adset"})
+        f_ad        = ex.submit(_get, f"{aid}/insights", {
+            "fields": AD_INSIGHT_FIELDS, "date_preset": date_preset, "level": "ad"})
+        f_campaigns = ex.submit(_get_all, f"{aid}/campaigns", {
+            "fields": "id,name,status,objective,daily_budget,lifetime_budget"})
+        f_creatives = ex.submit(_fetch_ad_creatives, aid)
+        f_ig        = ex.submit(_fetch_ig_for_account, aid, date_preset)
+
+        camp_insights  = f_camp.result().get("data", [])
+        adset_insights = f_adset.result().get("data", [])
+        ad_insights    = f_ad.result().get("data", [])
+        campaigns_raw  = f_campaigns.result()
+        creative_map   = f_creatives.result()
+        ig_organic     = f_ig.result()
+
+    camp_map = {c["id"]: c for c in campaigns_raw}
+
+    camp_metrics = []
+    for ci in camp_insights:
+        cid  = ci.get("campaign_id", "")
+        meta = camp_map.get(cid, {})
+        camp_metrics.append(_parse(ci, {
+            "campaign_id":   cid,
+            "campaign_name": ci.get("campaign_name", meta.get("name", "")),
+            "status":        meta.get("status", ""),
+            "objetivo":      meta.get("objective", ""),
+        }))
+
+    adset_metrics = [_parse(r, {
+        "adset_id":      r.get("adset_id", ""),
+        "adset_name":    r.get("adset_name", ""),
+        "campaign_name": r.get("campaign_name", ""),
+    }) for r in adset_insights]
+
+    ad_metrics = []
+    for ad_row in ad_insights:
+        ad_id = ad_row.get("ad_id", "")
+        info  = creative_map.get(ad_id, {})
+        ad_metrics.append(_parse(ad_row, {
+            "ad_id":         ad_id,
+            "ad_name":       ad_row.get("ad_name", info.get("ad_name", "")),
+            "campaign_name": ad_row.get("campaign_name", ""),
+            "adset_name":    ad_row.get("adset_name", ""),
+            "thumbnail_url": info.get("thumbnail_url", ""),
+            "creative_id":   info.get("creative_id", ""),
+        }))
+
+    t_gasto      = sum(m["gasto"]            for m in camp_metrics)
+    t_compras    = sum(m["compras"]           for m in camp_metrics)
+    t_receita    = sum(m["receita"]           for m in camp_metrics)
+    t_alcance    = sum(m["alcance"]           for m in camp_metrics)
+    t_impressoes = sum(m["impressoes"]        for m in camp_metrics)
+    t_cliques    = sum(m["cliques_link"]      for m in camp_metrics)
+    t_visitas_ig = sum(m["visitas_instagram"] for m in camp_metrics)
+    t_conv       = sum(m["conv_mensagens"]    for m in camp_metrics)
+
+    return {
+        "id":    aid,
+        "nome":  nome,
+        "moeda": acc.get("currency", "BRL"),
+        "totais": {
+            "alcance":            t_alcance,
+            "impressoes":         t_impressoes,
+            "cliques_link":       t_cliques,
+            "visitas_instagram":  t_visitas_ig,
+            "conv_mensagens":     t_conv,
+            "custo_por_mensagem": round(t_gasto / t_conv, 2)    if t_conv    > 0 else 0,
+            "compras":            t_compras,
+            "custo_por_compra":   round(t_gasto / t_compras, 2) if t_compras > 0 else 0,
+            "receita":            round(t_receita, 2),
+            "gasto":              round(t_gasto, 2),
+            "roas":               round(t_receita / t_gasto, 2) if t_gasto   > 0 else 0,
+        },
+        "campanhas":          camp_metrics,
+        "conjuntos":          adset_metrics,
+        "criativos":          ad_metrics,
+        "instagram_organico": ig_organic,
+    }
+
+
 def fetch_report(date_preset="last_7d"):
     accounts_raw = _get_all("me/adaccounts", {
         "fields": "id,name,account_status,currency,amount_spent,balance"
     })
     accounts = [a for a in accounts_raw if a.get("account_status") == 1]
 
+    contas = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_fetch_account, acc, date_preset): acc["name"] for acc in accounts}
+        for future in as_completed(futures):
+            try:
+                contas.append(future.result())
+            except Exception:
+                pass
+
+    contas.sort(key=lambda x: x["nome"])
+
     report = {
         "gerado_em":   datetime.datetime.now().isoformat(),
         "date_preset": date_preset,
-        "contas":      [],
+        "contas":      contas,
     }
-
-    for acc in accounts:
-        aid  = acc["id"]
-        nome = acc["name"]
-
-        # ── Insights por campanha ─────────────────────────────────────────
-        camp_insights = _get(f"{aid}/insights", {
-            "fields":      INSIGHT_FIELDS,
-            "date_preset": date_preset,
-            "level":       "campaign",
-        }).get("data", [])
-
-        # ── Insights por conjunto ─────────────────────────────────────────
-        adset_insights = _get(f"{aid}/insights", {
-            "fields":      INSIGHT_FIELDS,
-            "date_preset": date_preset,
-            "level":       "adset",
-        }).get("data", [])
-
-        # ── Insights por anúncio (criativos) ─────────────────────────────
-        ad_insights = _get(f"{aid}/insights", {
-            "fields":      AD_INSIGHT_FIELDS,
-            "date_preset": date_preset,
-            "level":       "ad",
-        }).get("data", [])
-
-        # ── Metadados das campanhas ───────────────────────────────────────
-        campaigns_raw = _get_all(f"{aid}/campaigns", {
-            "fields": "id,name,status,objective,daily_budget,lifetime_budget"
-        })
-        camp_map = {c["id"]: c for c in campaigns_raw}
-
-        # ── Thumbnails dos criativos ──────────────────────────────────────
-        creative_map = _fetch_ad_creatives(aid)
-
-        # ── Instagram Orgânico ────────────────────────────────────────────
-        ig_organic = None
-        try:
-            ig_id = None
-            # Método 1: contas IG conectadas diretamente à conta de anúncios
-            ig_accs = _get_all(f"{aid}/connected_instagram_accounts", {"fields": "id,username,name"})
-            if ig_accs:
-                ig_id = ig_accs[0]["id"]
-
-            # Método 2: via Business Manager da conta de anúncios
-            if not ig_id:
-                acc_info = _get(aid, {"fields": "business"})
-                biz = acc_info.get("business", {})
-                biz_id = biz.get("id") if biz else None
-                if biz_id:
-                    ig_biz = _get_all(f"{biz_id}/instagram_business_accounts", {
-                        "fields": "id,username,name"
-                    })
-                    if ig_biz:
-                        ig_id = ig_biz[0]["id"]
-
-            if ig_id:
-                ig_organic = _fetch_instagram_organic(ig_id, date_preset)
-        except Exception:
-            ig_organic = None
-
-        # ── Processar campanhas ───────────────────────────────────────────
-        camp_metrics = []
-        for ci in camp_insights:
-            cid  = ci.get("campaign_id", "")
-            meta = camp_map.get(cid, {})
-            m    = _parse(ci, {
-                "campaign_id":   cid,
-                "campaign_name": ci.get("campaign_name", meta.get("name", "")),
-                "status":        meta.get("status", ""),
-                "objetivo":      meta.get("objective", ""),
-            })
-            camp_metrics.append(m)
-
-        # ── Processar conjuntos ───────────────────────────────────────────
-        adset_metrics = []
-        for ai_row in adset_insights:
-            m = _parse(ai_row, {
-                "adset_id":      ai_row.get("adset_id", ""),
-                "adset_name":    ai_row.get("adset_name", ""),
-                "campaign_name": ai_row.get("campaign_name", ""),
-            })
-            adset_metrics.append(m)
-
-        # ── Processar anúncios / criativos ────────────────────────────────
-        ad_metrics = []
-        for ad_row in ad_insights:
-            ad_id = ad_row.get("ad_id", "")
-            info  = creative_map.get(ad_id, {})
-            m = _parse(ad_row, {
-                "ad_id":          ad_id,
-                "ad_name":        ad_row.get("ad_name", info.get("ad_name", "")),
-                "campaign_name":  ad_row.get("campaign_name", ""),
-                "adset_name":     ad_row.get("adset_name", ""),
-                "thumbnail_url":  info.get("thumbnail_url", ""),
-                "creative_id":    info.get("creative_id", ""),
-            })
-            ad_metrics.append(m)
-
-        # ── Totais da conta ───────────────────────────────────────────────
-        t_gasto      = sum(m["gasto"]             for m in camp_metrics)
-        t_compras    = sum(m["compras"]            for m in camp_metrics)
-        t_receita    = sum(m["receita"]            for m in camp_metrics)
-        t_alcance    = sum(m["alcance"]            for m in camp_metrics)
-        t_impressoes = sum(m["impressoes"]         for m in camp_metrics)
-        t_cliques    = sum(m["cliques_link"]       for m in camp_metrics)
-        t_visitas_ig = sum(m["visitas_instagram"]  for m in camp_metrics)
-        t_conv       = sum(m["conv_mensagens"]     for m in camp_metrics)
-        t_cpp        = round(t_gasto / t_compras, 2)  if t_compras > 0 else 0
-        t_custo_msg  = round(t_gasto / t_conv, 2)     if t_conv > 0    else 0
-        t_roas       = round(t_receita / t_gasto, 2)  if t_gasto > 0   else 0
-
-        report["contas"].append({
-            "id":    aid,
-            "nome":  nome,
-            "moeda": acc.get("currency", "BRL"),
-            "totais": {
-                "alcance":            t_alcance,
-                "impressoes":         t_impressoes,
-                "cliques_link":       t_cliques,
-                "visitas_instagram":  t_visitas_ig,
-                "conv_mensagens":     t_conv,
-                "custo_por_mensagem": t_custo_msg,
-                "compras":            t_compras,
-                "custo_por_compra":   t_cpp,
-                "receita":            round(t_receita, 2),
-                "gasto":              round(t_gasto, 2),
-                "roas":               t_roas,
-            },
-            "campanhas":          camp_metrics,
-            "conjuntos":          adset_metrics,
-            "criativos":          ad_metrics,
-            "instagram_organico": ig_organic,
-        })
 
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)

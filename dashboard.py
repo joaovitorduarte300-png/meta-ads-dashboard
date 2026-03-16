@@ -222,11 +222,15 @@ with st.sidebar:
     with c1:
         if st.button("🔄 Atualizar"):
             with st.spinner("Buscando..."):
-                st.session_state["report"] = fetch_report(date_preset)
+                novo = fetch_report(date_preset)
+                if novo and novo.get("contas"):
+                    st.session_state[f"report_{date_preset}"] = novo
             st.success("Atualizado!")
     with c2:
         if st.button("📋 Cache"):
-            st.session_state["report"] = load_report()
+            cached = load_report()
+            if cached and cached.get("contas"):
+                st.session_state[f"report_{cached.get('date_preset', date_preset)}"] = cached
             st.success("Carregado!")
 
     st.markdown("---")
@@ -238,20 +242,34 @@ with st.sidebar:
 
 
 # ─── Carregar dados ──────────────────────────────────────────────────────────
-if "report" not in st.session_state:
-    cached = load_report()
-    if cached:
-        st.session_state["report"] = cached
-    else:
-        st.markdown("""
-        <div style='text-align:center;padding:60px 20px'>
-          <span style='font-size:48px'>📡</span>
-          <h3 style='color:#64748b;margin-top:16px'>Nenhum relatório carregado</h3>
-          <p style='color:#475569'>Clique em <strong>Atualizar</strong> na barra lateral</p>
-        </div>""", unsafe_allow_html=True)
-        st.stop()
+report_session_key = f"report_{date_preset}"
 
-report = st.session_state["report"]
+if report_session_key not in st.session_state:
+    cached = load_report()
+    if cached and cached.get("date_preset") == date_preset and cached.get("contas"):
+        st.session_state[report_session_key] = cached
+    else:
+        with st.spinner(f"🔄 Carregando dados para '{preset_label}'..."):
+            try:
+                novo = fetch_report(date_preset)
+                if novo and novo.get("contas"):
+                    st.session_state[report_session_key] = novo
+                elif cached and cached.get("contas"):
+                    st.session_state[report_session_key] = cached
+            except Exception:
+                if cached and cached.get("contas"):
+                    st.session_state[report_session_key] = cached
+
+if report_session_key not in st.session_state:
+    st.markdown("""
+    <div style='text-align:center;padding:60px 20px'>
+      <span style='font-size:48px'>📡</span>
+      <h3 style='color:#64748b;margin-top:16px'>Nenhum relatório carregado</h3>
+      <p style='color:#475569'>Clique em <strong>Atualizar</strong> na barra lateral</p>
+    </div>""", unsafe_allow_html=True)
+    st.stop()
+
+report = st.session_state[report_session_key]
 if not report or not report.get("contas"):
     st.warning("Nenhuma conta com dados.")
     st.stop()
