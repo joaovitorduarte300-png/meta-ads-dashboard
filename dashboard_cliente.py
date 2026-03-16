@@ -568,6 +568,223 @@ else:
         st.plotly_chart(fig_cr, use_container_width=True)
 
 
+# ─── Instagram Orgânico ──────────────────────────────────────────────────────
+ig_data = conta.get("instagram_organico")
+
+st.markdown("""
+<div style='display:flex;align-items:center;gap:12px;margin:36px 0 20px'>
+  <div style='height:1px;flex:1;background:linear-gradient(90deg,transparent,#833AB4)'></div>
+  <div style='font-size:14px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
+              background:linear-gradient(90deg,#833AB4,#FD1D1D,#FCB045);
+              -webkit-background-clip:text;-webkit-text-fill-color:transparent'>
+    📱 Instagram Orgânico
+  </div>
+  <div style='height:1px;flex:1;background:linear-gradient(90deg,#FCB045,transparent)'></div>
+</div>
+""", unsafe_allow_html=True)
+
+if not ig_data:
+    st.markdown("""
+    <div style='background:#111827;border:1px solid #1e293b;border-radius:14px;
+                padding:32px;text-align:center;margin-bottom:24px'>
+      <div style='font-size:36px;margin-bottom:12px'>📱</div>
+      <div style='font-size:15px;font-weight:600;color:#64748b'>Nenhuma conta Instagram conectada</div>
+      <div style='font-size:13px;color:#475569;margin-top:8px'>
+        Vincule uma conta Instagram Comercial ao gerenciador de anúncios para ver os dados orgânicos.
+      </div>
+    </div>""", unsafe_allow_html=True)
+else:
+    followers     = ig_data.get("followers", 0)
+    delta         = ig_data.get("follower_delta", 0)
+    delta_color   = "#10b981" if delta > 0 else ("#ef4444" if delta < 0 else "#64748b")
+    delta_icon    = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
+    delta_txt     = f"{delta_icon} {abs(delta):+,} seguidores no período"
+    username      = ig_data.get("username", "")
+    name_ig       = ig_data.get("name", "") or username
+    bio           = (ig_data.get("biography") or "")[:130]
+    pic           = ig_data.get("profile_picture", "")
+
+    pic_html = (
+        f'<img src="{pic}" style="width:72px;height:72px;border-radius:50%;'
+        f'border:2px solid #833AB4;object-fit:cover;flex-shrink:0" />'
+        if pic else
+        '<div style="width:72px;height:72px;border-radius:50%;flex-shrink:0;'
+        'background:linear-gradient(135deg,#833AB4,#FD1D1D,#FCB045);'
+        'display:flex;align-items:center;justify-content:center;font-size:28px">📸</div>'
+    )
+
+    st.markdown(f"""
+    <div style='background:linear-gradient(135deg,#833AB4 0%,#FD1D1D 50%,#FCB045 100%);
+                padding:2px;border-radius:18px;margin-bottom:20px'>
+      <div style='background:#111827;border-radius:16px;padding:20px 24px;
+                  display:flex;align-items:center;gap:20px;flex-wrap:wrap'>
+        {pic_html}
+        <div style='flex:1;min-width:180px'>
+          <div style='font-size:18px;font-weight:700;color:#f1f5f9'>{name_ig}</div>
+          <div style='font-size:13px;font-weight:600;
+                      background:linear-gradient(90deg,#833AB4,#FD1D1D);
+                      -webkit-background-clip:text;-webkit-text-fill-color:transparent'>
+            @{username}
+          </div>
+          {f'<div style="font-size:12px;color:#64748b;margin-top:6px;line-height:1.5">{bio}</div>' if bio else ''}
+        </div>
+        <div style='text-align:center;min-width:140px'>
+          <div style='font-size:10px;color:#64748b;letter-spacing:1.2px;text-transform:uppercase'>Seguidores</div>
+          <div style='font-size:32px;font-weight:700;color:#f1f5f9'>{NUM(followers)}</div>
+          <div style='font-size:12px;color:{delta_color};margin-top:2px'>{delta_txt}</div>
+        </div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Stats orgânicos ──
+    ig_c1, ig_c2, ig_c3, ig_c4 = st.columns(4)
+    with ig_c1: st.markdown(kpi("👁","Alcance Orgânico",      NUM(ig_data.get("alcance_organico",0)),     "purple"), unsafe_allow_html=True)
+    with ig_c2: st.markdown(kpi("📊","Impressões Orgânicas",  NUM(ig_data.get("impressoes_organicas",0)), "indigo"), unsafe_allow_html=True)
+    with ig_c3: st.markdown(kpi("👤","Visitas ao Perfil",     NUM(ig_data.get("visitas_perfil",0)),       "pink"),   unsafe_allow_html=True)
+    with ig_c4: st.markdown(kpi("📝","Posts no Período",      NUM(ig_data.get("posts_no_periodo",0)),     "orange"), unsafe_allow_html=True)
+
+    # ── Tabs de mídia ──
+    ig_t1, ig_t2, ig_t3, ig_t4 = st.tabs(["🎬 Reels", "📷 Posts", "🖼️ Carrosséis", "💡 Insights & Dicas"])
+
+    def _render_media_grid(media_list, emoji_placeholder="🖼️"):
+        if not media_list:
+            st.info("Nenhuma publicação encontrada para este formato no período.")
+            return
+        items = media_list[:9]
+        rows  = [items[i:i+3] for i in range(0, len(items), 3)]
+        for row in rows:
+            cols = st.columns(3)
+            for ci, m in enumerate(row):
+                with cols[ci]:
+                    thumb    = m.get("thumbnail_url") or m.get("media_url", "")
+                    caption  = (m.get("caption") or "Sem legenda")[:80]
+                    likes    = m.get("like_count", 0) or 0
+                    comments = m.get("comments_count", 0) or 0
+                    eng      = likes + comments
+                    ts       = (m.get("timestamp") or "")[:10]
+                    link     = m.get("permalink", "#")
+                    img_html = (
+                        f'<img src="{thumb}" style="width:100%;height:190px;'
+                        f'object-fit:cover;border-radius:10px 10px 0 0;display:block" />'
+                        if thumb and thumb.startswith("http") else
+                        f'<div style="width:100%;height:190px;border-radius:10px 10px 0 0;'
+                        f'background:linear-gradient(135deg,#1a1f2e,#111827);'
+                        f'display:flex;align-items:center;justify-content:center;'
+                        f'font-size:44px">{emoji_placeholder}</div>'
+                    )
+                    st.markdown(f"""
+                    <a href="{link}" target="_blank" style="text-decoration:none">
+                    <div style='background:#111827;border:1px solid #1e293b;border-radius:12px;
+                                overflow:hidden;margin-bottom:14px;transition:all .2s'>
+                      {img_html}
+                      <div style='padding:12px 14px'>
+                        <div style='font-size:11px;color:#64748b;margin-bottom:8px;
+                                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+                             title="{caption}">{caption}</div>
+                        <div style='display:flex;justify-content:space-between;font-size:13px;font-weight:600'>
+                          <span style='color:#ec4899'>❤️ {likes:,}</span>
+                          <span style='color:#60a5fa'>💬 {comments:,}</span>
+                          <span style='color:#f59e0b'>⚡ {eng:,}</span>
+                        </div>
+                        <div style='font-size:10px;color:#334155;margin-top:6px'>{ts}</div>
+                      </div>
+                    </div>
+                    </a>""", unsafe_allow_html=True)
+
+    with ig_t1:
+        _render_media_grid(ig_data.get("reels", []), "🎬")
+
+    with ig_t2:
+        _render_media_grid(ig_data.get("posts", []), "📷")
+
+    with ig_t3:
+        _render_media_grid(ig_data.get("carroseis", []), "🖼️")
+
+    with ig_t4:
+        alc   = ig_data.get("alcance_organico", 0)
+        impr  = ig_data.get("impressoes_organicas", 0)
+        vis   = ig_data.get("visitas_perfil", 0)
+        n_pos = ig_data.get("posts_no_periodo", 0)
+        reels_list = ig_data.get("reels", [])
+
+        # ── Insights automáticos baseados nos dados ──
+        insights_auto = []
+        if delta > 0:
+            insights_auto.append(("✅", "Crescimento de Seguidores",
+                f"Você ganhou +{delta:,} seguidores no período. Ótimo resultado — continue com a consistência!"))
+        elif delta < 0:
+            insights_auto.append(("⚠️", "Queda de Seguidores",
+                f"Você perdeu {abs(delta):,} seguidores. Avalie a frequência e a qualidade do conteúdo publicado."))
+
+        if alc > 0 and followers > 0:
+            taxa = alc / followers * 100
+            if taxa > 50:
+                insights_auto.append(("🚀", "Alcance Orgânico Acima da Média",
+                    f"Seu alcance equivale a {taxa:.0f}% dos seguidores — muito acima da média do mercado (20-30%)!"))
+            elif taxa > 20:
+                insights_auto.append(("📊", "Bom Alcance Orgânico",
+                    f"Alcance de {taxa:.0f}% dos seguidores. Reels têm potencial para ampliar ainda mais esse número."))
+            else:
+                insights_auto.append(("💡", "Oportunidade de Crescimento",
+                    f"Alcance atual: {taxa:.0f}% dos seguidores. Invista em Reels e colaborações para aumentar."))
+
+        if vis > 0 and followers > 0:
+            taxa_v = vis / followers * 100
+            insights_auto.append(("👤", "Interesse no Perfil",
+                f"{taxa_v:.1f}% dos seguidores visitaram seu perfil no período — conteúdo gerando curiosidade."))
+
+        if reels_list:
+            top = reels_list[0]
+            insights_auto.append(("🎬", "Reel em Destaque",
+                f"Seu melhor Reel teve {top.get('engagement',0):,} interações "
+                f"({top.get('like_count',0):,} ❤️ + {top.get('comments_count',0):,} 💬). Use como referência!"))
+
+        if n_pos == 0:
+            insights_auto.append(("📅", "Nenhum Post no Período",
+                "Nenhuma publicação encontrada no período. Publique pelo menos 3× por semana para crescer."))
+        elif n_pos >= 10:
+            insights_auto.append(("🏆", "Excelente Frequência!",
+                f"{n_pos} posts no período — consistência é um dos maiores fatores de crescimento."))
+
+        if impr > 0 and alc > 0:
+            freq_org = round(impr / alc, 2)
+            insights_auto.append(("🔁", "Frequência Orgânica",
+                f"Cada seguidor viu seu conteúdo em média {freq_org}× no período. "
+                + ("Ótimo engajamento!" if freq_org >= 2 else "Tente diversificar os formatos de conteúdo.")))
+
+        for emoji, titulo, texto in insights_auto:
+            st.markdown(f"""
+            <div style='background:linear-gradient(135deg,#111827,#1a1f2e);
+                        border:1px solid #1e293b;border-radius:12px;padding:16px 20px;
+                        margin-bottom:10px;border-left:3px solid #833AB4'>
+              <div style='font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px'>
+                {emoji} {titulo}
+              </div>
+              <div style='font-size:13px;color:#94a3b8;line-height:1.6'>{texto}</div>
+            </div>""", unsafe_allow_html=True)
+
+        # ── Dicas estratégicas ──
+        st.markdown("<div style='margin-top:24px;margin-bottom:12px;font-size:14px;font-weight:700;color:#f1f5f9'>💡 Dicas para Crescer no Instagram</div>", unsafe_allow_html=True)
+        dicas = [
+            ("🎬", "Aposte em Reels",       "Reels têm 2× mais alcance que posts estáticos. Tente publicar ao menos 3 Reels por semana."),
+            ("📅", "Melhores Horários",      "Para a maioria dos nichos, os melhores horários são entre 18h e 21h em dias úteis."),
+            ("💬", "Engaje nos Comentários", "Responder comentários nas primeiras 2h após o post aumenta significativamente o alcance."),
+            ("🏷️", "Hashtags Estratégicas",  "Use de 5 a 10 hashtags relevantes — misture hashtags grandes, médias e de nicho."),
+            ("📖", "Stories Diários",        "Publique de 3 a 7 Stories por dia para manter o perfil ativo e relevante no feed."),
+            ("🤝", "Colaborações",           "Parcerias com perfis do mesmo nicho aumentam o alcance e trazem seguidores qualificados."),
+        ]
+        d1, d2 = st.columns(2)
+        for i, (em, tit, txt) in enumerate(dicas):
+            col = d1 if i % 2 == 0 else d2
+            with col:
+                st.markdown(f"""
+                <div style='background:#111827;border:1px solid #1e293b;border-radius:12px;
+                            padding:14px 18px;margin-bottom:10px'>
+                  <div style='font-size:13px;font-weight:700;color:#f1f5f9;margin-bottom:4px'>{em} {tit}</div>
+                  <div style='font-size:12px;color:#64748b;line-height:1.5'>{txt}</div>
+                </div>""", unsafe_allow_html=True)
+
+
 # ─── Chat com IA ─────────────────────────────────────────────────────────────
 st.markdown('<div class="section-title">💬 Assistente IA</div>', unsafe_allow_html=True)
 

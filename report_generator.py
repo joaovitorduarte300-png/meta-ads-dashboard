@@ -4,7 +4,7 @@ Executado toda segunda-feira às 08h ou sob demanda.
 """
 import sys, json, os, datetime, requests
 
-ACCESS_TOKEN = "EAAW8pPurJVQBQ3R8HmC4cxtky6mZCcCt5IX3xz9XD5TZCxLXqwPZC3PsBoFLjOiRZCWqvkNgK3AHvgtZAatTxbcYPYZC0mGEB2Q35bQ5O1BLNA4Rt6ZAEf711FLxjIzhXmUCWRmEwhgHo2mb0AVBVuHpWRrZCGAqEWlQZCZATBzJ2UnsQRvsn1ChVmEQZBhowrkZBDOHeuZB5YZCrDSQZDZD"
+ACCESS_TOKEN = "EAAW8pPurJVQBQ5xd4AVeZBanXVxrVOhPYQCTH4p77P3d41RHBWZCRVopA3WhGbpqesokkGhNlXTZBZA3vexc4SF9Ol93IluKegPV7ZCTa0xaADMuX33wCWNCjlNoDC7sTVPeRgQzZBpAynKZBZANEpBeOXhTyMZCZCW4ZAzmMaluzHT2UG7INA939CPYx0xqYHtz0mcr3sYpZA03j6k7GgZDZD"
 BASE_URL   = "https://graph.facebook.com/v21.0"
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "report_cache.json")
 
@@ -124,6 +124,116 @@ def _fetch_ad_creatives(aid):
         return {}
 
 
+def _ig_date_range(date_preset):
+    """Converte date_preset para timestamps Unix para a Instagram Insights API."""
+    now = datetime.datetime.now()
+    days_map = {
+        "today": 1, "yesterday": 2, "last_7d": 7, "last_14d": 14,
+        "last_30d": 30, "this_month": max(1, now.day - 1), "last_month": 30, "maximum": 90,
+    }
+    days = days_map.get(date_preset, 7)
+    since = int((now - datetime.timedelta(days=days)).timestamp())
+    until = int(now.timestamp())
+    return since, until, days
+
+
+def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
+    """Busca dados orgânicos do Instagram: perfil, insights, mídia."""
+    try:
+        profile = _get(ig_user_id, {
+            "fields": "followers_count,media_count,name,username,profile_picture_url,biography"
+        })
+        if "error" in profile or "followers_count" not in profile:
+            return None
+
+        since, until, days = _ig_date_range(date_preset)
+
+        # Insights da conta (reach, impressions, profile_views, follower_count)
+        try:
+            ins_raw = _get(f"{ig_user_id}/insights", {
+                "metric": "reach,impressions,profile_views,follower_count",
+                "period": "day",
+                "since": since,
+                "until": until,
+            })
+            ai_data = ins_raw.get("data", [])
+        except Exception:
+            ai_data = []
+
+        def _sum_ig(name):
+            item = next((i for i in ai_data if i.get("name") == name), None)
+            return sum(v.get("value", 0) for v in item.get("values", [])) if item else 0
+
+        follower_delta = 0
+        fc = next((i for i in ai_data if i.get("name") == "follower_count"), None)
+        if fc:
+            vals = fc.get("values", [])
+            if len(vals) >= 2:
+                follower_delta = vals[-1].get("value", 0) - vals[0].get("value", 0)
+
+        # Lista de mídias
+        try:
+            media_raw = _get_all(f"{ig_user_id}/media", {
+                "fields": "id,media_type,timestamp,like_count,comments_count,"
+                          "thumbnail_url,media_url,permalink,caption",
+                "limit": 50,
+            })
+        except Exception:
+            media_raw = []
+
+        for m in media_raw:
+            m["engagement"] = (m.get("like_count") or 0) + (m.get("comments_count") or 0)
+
+        media_sorted = sorted(media_raw, key=lambda x: x.get("engagement", 0), reverse=True)
+
+        # Contar posts no período
+        since_dt = datetime.datetime.now() - datetime.timedelta(days=days)
+        posts_periodo = 0
+        for m in media_raw:
+            try:
+                ts = datetime.datetime.fromisoformat(
+                    m.get("timestamp", "").replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+                if ts >= since_dt:
+                    posts_periodo += 1
+            except Exception:
+                pass
+
+        reels    = [m for m in media_sorted if m.get("media_type") == "VIDEO"][:10]
+        posts    = [m for m in media_sorted if m.get("media_type") == "IMAGE"][:10]
+        carroseis = [m for m in media_sorted if m.get("media_type") == "CAROUSEL_ALBUM"][:10]
+
+        # Stories (apenas últimas 24h)
+        try:
+            stories = _get_all(f"{ig_user_id}/stories", {
+                "fields": "id,media_type,timestamp,thumbnail_url,media_url",
+            })
+        except Exception:
+            stories = []
+
+        return {
+            "ig_user_id":           ig_user_id,
+            "username":             profile.get("username", ""),
+            "name":                 profile.get("name", ""),
+            "followers":            profile.get("followers_count", 0),
+            "media_count":          profile.get("media_count", 0),
+            "profile_picture":      profile.get("profile_picture_url", ""),
+            "biography":            profile.get("biography", ""),
+            "follower_delta":       follower_delta,
+            "alcance_organico":     _sum_ig("reach"),
+            "impressoes_organicas": _sum_ig("impressions"),
+            "visitas_perfil":       _sum_ig("profile_views"),
+            "posts_no_periodo":     posts_periodo,
+            "reels":                reels,
+            "posts":                posts,
+            "carroseis":            carroseis,
+            "stories":              stories,
+            "top_media":            media_sorted[:6],
+        }
+    except Exception:
+        return None
+
+
 def fetch_report(date_preset="last_7d"):
     accounts_raw = _get_all("me/adaccounts", {
         "fields": "id,name,account_status,currency,amount_spent,balance"
@@ -169,6 +279,17 @@ def fetch_report(date_preset="last_7d"):
 
         # ── Thumbnails dos criativos ──────────────────────────────────────
         creative_map = _fetch_ad_creatives(aid)
+
+        # ── Instagram Orgânico ────────────────────────────────────────────
+        ig_organic = None
+        try:
+            ig_accs = _get_all(f"{aid}/connected_instagram_accounts", {
+                "fields": "id,username,name"
+            })
+            if ig_accs:
+                ig_organic = _fetch_instagram_organic(ig_accs[0]["id"], date_preset)
+        except Exception:
+            ig_organic = None
 
         # ── Processar campanhas ───────────────────────────────────────────
         camp_metrics = []
@@ -238,9 +359,10 @@ def fetch_report(date_preset="last_7d"):
                 "gasto":              round(t_gasto, 2),
                 "roas":               t_roas,
             },
-            "campanhas":  camp_metrics,
-            "conjuntos":  adset_metrics,
-            "criativos":  ad_metrics,
+            "campanhas":          camp_metrics,
+            "conjuntos":          adset_metrics,
+            "criativos":          ad_metrics,
+            "instagram_organico": ig_organic,
         })
 
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
