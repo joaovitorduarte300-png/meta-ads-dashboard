@@ -2,7 +2,7 @@
 Meta Ads Dashboard — Streamlit
 Relatório interativo com chat IA (Claude) para análise de campanhas.
 """
-import json, os, datetime, base64, threading
+import json, os, datetime, base64, threading, html as _html
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -562,68 +562,77 @@ else:
             cols_html = st.columns(cols_per_row)
             for col_idx, (_, cr) in enumerate(row_df.iterrows()):
                 with cols_html[col_idx]:
-                    thumb = cr.get("thumbnail_url","")
-                    roas_cr = cr.get("roas",0)
-                    roas_cls = "green" if roas_cr>=3 else ("yellow" if roas_cr>=1 else "red")
-                    cpp_cr = cr.get("custo_por_compra",0)
+                    try:
+                        thumb    = str(cr.get("thumbnail_url") or "")
+                        roas_cr  = float(cr.get("roas") or 0)
+                        roas_cls = "green" if roas_cr>=3 else ("yellow" if roas_cr>=1 else "red")
+                        cpp_cr   = float(cr.get("custo_por_compra") or 0)
+                        ctr_cr   = float(cr.get("ctr") or 0)
+                        gasto_cr = float(cr.get("gasto") or 0)
+                        imp_cr   = int(cr.get("impressoes") or 0)
+                        clk_cr   = int(cr.get("cliques_link") or 0)
+                        cmp_cr   = int(cr.get("compras") or 0)
+                        msg_cr   = int(cr.get("conv_mensagens") or 0)
+                        cmsg_cr  = float(cr.get("custo_por_mensagem") or 0)
+                        rec_cr   = float(cr.get("receita") or 0)
+                        nome_raw = str(cr.get("ad_name") or "Sem nome")
+                        nome     = _html.escape(nome_raw[:42] + "..." if len(nome_raw) > 45 else nome_raw)
+                        nome_title = _html.escape(nome_raw, quote=True)
 
-                    # Thumbnail
-                    if thumb and thumb.startswith("http"):
-                        thumb_html = f'<img src="{thumb}" class="creative-thumb" />'
-                    else:
-                        thumb_html = '<div class="creative-thumb-placeholder">🖼️</div>'
+                        if thumb and thumb.startswith("http"):
+                            thumb_html = f'<img src="{_html.escape(thumb, quote=True)}" class="creative-thumb" />'
+                        else:
+                            thumb_html = '<div class="creative-thumb-placeholder">🖼️</div>'
 
-                    nome = cr.get("ad_name","Sem nome")
-                    if len(nome) > 45:
-                        nome = nome[:42] + "..."
-
-                    st.markdown(f"""
-                    <div class="creative-card">
-                      {thumb_html}
-                      <div class="creative-body">
-                        <div class="creative-name" title="{cr.get('ad_name','')}">{nome}</div>
-                        <div class="creative-metric">
-                          <span class="cm-label">💸 Gasto</span>
-                          <span class="cm-value">{BRL(cr['gasto'])}</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">👁 Impressões</span>
-                          <span class="cm-value">{NUM(cr['impressoes'])}</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">🖱 Cliques</span>
-                          <span class="cm-value">{NUM(cr['cliques_link'])}</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">📊 CTR</span>
-                          <span class="cm-value">{cr.get('ctr',0):.2f}%</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">🛒 Compras</span>
-                          <span class="cm-value">{int(cr['compras'])}</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">💲 CPP</span>
-                          <span class="cm-value">{BRL(cpp_cr) if cpp_cr>0 else "—"}</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">📈 ROAS</span>
-                          <span class="cm-value {roas_cls}">{roas_cr:.2f}x</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">💬 Conv. Mensagem</span>
-                          <span class="cm-value">{int(cr.get('conv_mensagens',0))}</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">💸 Custo/Mensagem</span>
-                          <span class="cm-value">{BRL(cr.get('custo_por_mensagem',0)) if cr.get('custo_por_mensagem',0)>0 else "—"}</span>
-                        </div>
-                        <div class="creative-metric">
-                          <span class="cm-label">💰 Receita</span>
-                          <span class="cm-value green">{BRL(cr['receita'])}</span>
-                        </div>
-                      </div>
-                    </div>""", unsafe_allow_html=True)
+                        st.markdown(f"""
+                        <div class="creative-card">
+                          {thumb_html}
+                          <div class="creative-body">
+                            <div class="creative-name" title="{nome_title}">{nome}</div>
+                            <div class="creative-metric">
+                              <span class="cm-label">💸 Gasto</span>
+                              <span class="cm-value">{BRL(gasto_cr)}</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">👁 Impressões</span>
+                              <span class="cm-value">{NUM(imp_cr)}</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">🖱 Cliques</span>
+                              <span class="cm-value">{NUM(clk_cr)}</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">📊 CTR</span>
+                              <span class="cm-value">{ctr_cr:.2f}%</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">🛒 Compras</span>
+                              <span class="cm-value">{cmp_cr}</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">💲 CPP</span>
+                              <span class="cm-value">{BRL(cpp_cr) if cpp_cr>0 else "—"}</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">📈 ROAS</span>
+                              <span class="cm-value {roas_cls}">{roas_cr:.2f}x</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">💬 Conv. Mensagem</span>
+                              <span class="cm-value">{msg_cr}</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">💸 Custo/Mensagem</span>
+                              <span class="cm-value">{BRL(cmsg_cr) if cmsg_cr>0 else "—"}</span>
+                            </div>
+                            <div class="creative-metric">
+                              <span class="cm-label">💰 Receita</span>
+                              <span class="cm-value green">{BRL(rec_cr)}</span>
+                            </div>
+                          </div>
+                        </div>""", unsafe_allow_html=True)
+                    except Exception:
+                        st.warning("⚠️ Erro ao renderizar criativo.")
     else:
         # Modo tabela
         cols_cr = {
