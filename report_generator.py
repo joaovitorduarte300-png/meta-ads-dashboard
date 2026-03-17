@@ -153,14 +153,28 @@ def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
             })
 
         def _get_insights():
+            """Busca insights em dois grupos: time_series e total_value (API v17+)."""
+            ai_data = []
             try:
-                r = _get(f"{ig_user_id}/insights", {
-                    "metric": "reach,impressions,profile_views,follower_count",
+                # Grupo 1: métricas time_series (reach, follower_count)
+                r1 = _get(f"{ig_user_id}/insights", {
+                    "metric": "reach,follower_count",
                     "period": "day", "since": since, "until": until,
                 })
-                return r.get("data", [])
+                ai_data.extend(r1.get("data", []))
             except Exception:
-                return []
+                pass
+            try:
+                # Grupo 2: métricas total_value (views=impressões, profile_views, total_interactions)
+                r2 = _get(f"{ig_user_id}/insights", {
+                    "metric": "views,total_interactions,profile_views",
+                    "period": "day", "since": since, "until": until,
+                    "metric_type": "total_value",
+                })
+                ai_data.extend(r2.get("data", []))
+            except Exception:
+                pass
+            return ai_data
 
         def _get_media():
             try:
@@ -195,7 +209,13 @@ def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
 
         def _sum_ig(name):
             item = next((i for i in ai_data if i.get("name") == name), None)
-            return sum(v.get("value", 0) for v in item.get("values", [])) if item else 0
+            if not item:
+                return 0
+            # Formato total_value (API v17+): {"total_value": {"value": 203024}}
+            if "total_value" in item:
+                return item["total_value"].get("value", 0)
+            # Formato time_series: {"values": [{"value": 100}, ...]}
+            return sum(v.get("value", 0) for v in item.get("values", []))
 
         follower_delta = 0
         fc = next((i for i in ai_data if i.get("name") == "follower_count"), None)
@@ -234,8 +254,9 @@ def _fetch_instagram_organic(ig_user_id, date_preset="last_7d"):
             "biography":            profile.get("biography", ""),
             "follower_delta":       follower_delta,
             "alcance_organico":     _sum_ig("reach"),
-            "impressoes_organicas": _sum_ig("impressions"),
+            "impressoes_organicas": _sum_ig("views"),        # "impressions" removido na API v17+
             "visitas_perfil":       _sum_ig("profile_views"),
+            "total_interacoes":     _sum_ig("total_interactions"),
             "posts_no_periodo":     posts_periodo,
             "reels":                reels,
             "posts":                posts,
