@@ -363,13 +363,19 @@ if campanhas:
 
     with tab1:
         df_s = df.sort_values("gasto", ascending=False).head(12)
+        # Trunca nomes longos para caber no eixo Y (mobile-friendly)
+        labels = [n[:35]+"…" if len(n)>35 else n for n in df_s["campaign_name"]]
         fig = go.Figure()
-        fig.add_bar(name="💸 Gasto",   x=df_s["campaign_name"], y=df_s["gasto"],   marker_color="#3b82f6", marker_line_width=0)
-        fig.add_bar(name="💰 Receita", x=df_s["campaign_name"], y=df_s["receita"], marker_color="#10b981", marker_line_width=0)
-        fig.update_layout(**LAYOUT, barmode="group", height=400,
-                          legend=dict(orientation="h",y=1.08,x=0),
-                          xaxis=dict(tickangle=-30,tickfont=dict(size=11)),
-                          yaxis=dict(tickprefix="R$ "))
+        fig.add_bar(name="💸 Gasto",   y=labels, x=df_s["gasto"],   orientation="h",
+                    marker_color="#3b82f6", marker_line_width=0)
+        fig.add_bar(name="💰 Receita", y=labels, x=df_s["receita"], orientation="h",
+                    marker_color="#10b981", marker_line_width=0)
+        fig.update_layout(**LAYOUT, barmode="group",
+                          height=max(300, len(df_s)*55),
+                          legend=dict(orientation="h", y=1.05, x=0),
+                          xaxis=dict(tickprefix="R$ "),
+                          yaxis=dict(tickfont=dict(size=11), autorange="reversed"),
+                          margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
@@ -385,12 +391,15 @@ if campanhas:
         m_col = opts[m_label]
         df_m  = df[df[m_col]>0].sort_values(m_col, ascending=False).head(top_n)
         is_money = m_col in ["custo_por_compra","custo_por_mensagem","cpc","cpm"]
-        fig2 = px.bar(df_m, x="campaign_name", y=m_col, color=m_col,
-                      color_continuous_scale="Blues", template="plotly_dark",
-                      labels={"campaign_name":"Campanha", m_col: m_label})
-        fig2.update_layout(**LAYOUT, height=400,
-                           xaxis=dict(tickangle=-30),
-                           yaxis=dict(tickprefix="R$ " if is_money else ""),
+        labels_m = [n[:35]+"…" if len(n)>35 else n for n in df_m["campaign_name"]]
+        fig2 = px.bar(df_m, x=m_col, y=labels_m, orientation="h",
+                      color=m_col, color_continuous_scale="Blues", template="plotly_dark",
+                      labels={"y":"Campanha", m_col: m_label})
+        fig2.update_layout(**LAYOUT,
+                           height=max(300, len(df_m)*55),
+                           xaxis=dict(tickprefix="R$ " if is_money else ""),
+                           yaxis=dict(tickfont=dict(size=11), autorange="reversed"),
+                           margin=dict(l=10, r=10, t=20, b=10),
                            showlegend=False, coloraxis_showscale=False)
         fig2.update_traces(marker_line_width=0)
         st.plotly_chart(fig2, use_container_width=True)
