@@ -445,12 +445,12 @@ if campanhas:
 
     with tab4:
         t = totais
-        fl = ["Alcance","Impressões","Cliques no Link","Visitas Instagram","Conv. Mensagem","Compras"]
-        fv = [safe(t,"alcance"),safe(t,"impressoes"),safe(t,"cliques_link"),
-              safe(t,"visitas_instagram"),safe(t,"conv_mensagens"),safe(t,"compras")]
+        fl = ["Alcance","Impressões","Visitas Instagram","Cliques no Link","Conv. Mensagem"]
+        fv = [safe(t,"alcance"),safe(t,"impressoes"),safe(t,"visitas_instagram"),
+              safe(t,"cliques_link"),safe(t,"conv_mensagens")]
         fig_f = go.Figure(go.Funnel(
             y=fl, x=fv, textinfo="value+percent initial",
-            marker=dict(color=["#3b82f6","#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981"],
+            marker=dict(color=["#3b82f6","#6366f1","#ec4899","#8b5cf6","#f59e0b"],
                         line=dict(width=0)),
             connector=dict(line=dict(color="#1e293b", width=2)),
         ))
