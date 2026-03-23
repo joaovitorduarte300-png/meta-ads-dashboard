@@ -357,8 +357,8 @@ if campanhas:
         if col not in df.columns:
             df[col] = 0
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "💸 Gasto vs Receita","📊 Métricas","🔁 ROAS","🌀 Funil","📋 Tabela",
+    tab5, tab1, tab2, tab3, tab4 = st.tabs([
+        "📋 Tabela","💸 Gasto vs Receita","📊 Métricas","🔁 ROAS","🌀 Funil",
     ])
 
     with tab1:
