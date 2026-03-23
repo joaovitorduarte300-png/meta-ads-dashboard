@@ -373,8 +373,12 @@ if campanhas:
         fig.update_layout(**LAYOUT, barmode="group",
                           height=max(300, len(df_s)*55),
                           legend=dict(orientation="h", y=1.05, x=0),
-                          xaxis=dict(tickprefix="R$ "),
-                          yaxis=dict(tickfont=dict(size=11), autorange="reversed"))
+                          xaxis=dict(tickprefix="R$ ", showgrid=True,
+                                     gridcolor="rgba(148,163,184,0.15)",
+                                     gridwidth=1, zeroline=True,
+                                     zerolinecolor="rgba(148,163,184,0.3)"),
+                          yaxis=dict(tickfont=dict(size=11), autorange="reversed",
+                                     showgrid=False))
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
@@ -396,8 +400,13 @@ if campanhas:
                       labels={"y":"Campanha", m_col: m_label})
         fig2.update_layout(**LAYOUT,
                            height=max(300, len(df_m)*55),
-                           xaxis=dict(tickprefix="R$ " if is_money else ""),
-                           yaxis=dict(tickfont=dict(size=11), autorange="reversed"),
+                           xaxis=dict(tickprefix="R$ " if is_money else "",
+                                      showgrid=True,
+                                      gridcolor="rgba(148,163,184,0.15)",
+                                      gridwidth=1, zeroline=True,
+                                      zerolinecolor="rgba(148,163,184,0.3)"),
+                           yaxis=dict(tickfont=dict(size=11), autorange="reversed",
+                                      showgrid=False),
                            showlegend=False, coloraxis_showscale=False)
         fig2.update_traces(marker_line_width=0)
         st.plotly_chart(fig2, use_container_width=True)
@@ -510,7 +519,7 @@ else:
     cc1, cc2, cc3 = st.columns([2,1,1])
     with cc1: busca_cr  = st.text_input("🔍 Filtrar criativo", placeholder="Nome do anúncio...", key="cr_busca")
     with cc2: sort_cr   = st.selectbox("Ordenar por", ["Gasto","Receita","ROAS","Impressões","Cliques","Conv. Mensagem"], key="cr_sort")
-    with cc3: view_mode = st.radio("Visualização", ["Cards","Tabela"], horizontal=True, key="cr_view")
+    with cc3: view_mode = st.radio("Visualização", ["Cards","Tabela"], index=1, horizontal=True, key="cr_view")
 
     sort_cr_map = {"Gasto":"gasto","Receita":"receita","ROAS":"roas","Impressões":"impressoes","Cliques":"cliques_link","Conv. Mensagem":"conv_mensagens"}
     df_cr_f = df_cr.copy()
