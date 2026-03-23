@@ -374,8 +374,7 @@ if campanhas:
                           height=max(300, len(df_s)*55),
                           legend=dict(orientation="h", y=1.05, x=0),
                           xaxis=dict(tickprefix="R$ "),
-                          yaxis=dict(tickfont=dict(size=11), autorange="reversed"),
-                          margin=dict(l=10, r=10, t=40, b=10))
+                          yaxis=dict(tickfont=dict(size=11), autorange="reversed"))
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
@@ -399,7 +398,6 @@ if campanhas:
                            height=max(300, len(df_m)*55),
                            xaxis=dict(tickprefix="R$ " if is_money else ""),
                            yaxis=dict(tickfont=dict(size=11), autorange="reversed"),
-                           margin=dict(l=10, r=10, t=20, b=10),
                            showlegend=False, coloraxis_showscale=False)
         fig2.update_traces(marker_line_width=0)
         st.plotly_chart(fig2, use_container_width=True)
