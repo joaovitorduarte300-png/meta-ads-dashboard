@@ -502,10 +502,10 @@ else:
 
     cc1, cc2, cc3 = st.columns([2,1,1])
     with cc1: busca_cr  = st.text_input("🔍 Filtrar criativo", placeholder="Nome do anúncio...", key="cr_busca")
-    with cc2: sort_cr   = st.selectbox("Ordenar por", ["Gasto","Receita","ROAS","Impressões","Cliques"], key="cr_sort")
+    with cc2: sort_cr   = st.selectbox("Ordenar por", ["Gasto","Receita","ROAS","Impressões","Cliques","Conv. Mensagem"], key="cr_sort")
     with cc3: view_mode = st.radio("Visualização", ["Cards","Tabela"], horizontal=True, key="cr_view")
 
-    sort_cr_map = {"Gasto":"gasto","Receita":"receita","ROAS":"roas","Impressões":"impressoes","Cliques":"cliques_link"}
+    sort_cr_map = {"Gasto":"gasto","Receita":"receita","ROAS":"roas","Impressões":"impressoes","Cliques":"cliques_link","Conv. Mensagem":"conv_mensagens"}
     df_cr_f = df_cr.copy()
     if busca_cr:
         df_cr_f = df_cr_f[df_cr_f["ad_name"].str.contains(busca_cr, case=False, na=False)]
