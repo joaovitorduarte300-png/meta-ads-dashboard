@@ -2,21 +2,9 @@
 Meta Ads Dashboard — Streamlit
 Relatório interativo com chat IA (Claude) para análise de campanhas.
 """
-import json, os, datetime, base64, threading, html as _html
+import json, os, datetime
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
-
-def _load_logo():
-    for name in ["logo.png", "logo.png.png"]:
-        path = os.path.join(os.path.dirname(__file__), name)
-        try:
-            with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode()
-        except Exception:
-            continue
-    return None
-
-_LOGO_B64 = _load_logo()
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -123,17 +111,6 @@ section[data-testid="stSidebar"] {
 BRL = lambda v: f"R$ {v:,.2f}"
 NUM = lambda v: f"{int(v):,}"
 
-CACHE_MAX_AGE_H = 6  # horas antes de considerar o cache expirado
-
-def _cache_is_fresh(data):
-    """Retorna True se o cache foi gerado há menos de CACHE_MAX_AGE_H horas."""
-    try:
-        age = (datetime.datetime.now() -
-               datetime.datetime.fromisoformat(data.get("gerado_em", ""))).total_seconds()
-        return age < CACHE_MAX_AGE_H * 3600
-    except Exception:
-        return False
-
 PRESETS = {
     "Hoje":           "today",
     "Ontem":          "yesterday",
@@ -209,20 +186,12 @@ def build_context(report, idx):
 
 # ─── Sidebar ────────────────────────────────────────────────────────────────
 with st.sidebar:
-    if _LOGO_B64:
-        st.markdown(f"""
-        <div style='text-align:center;padding:16px 0 8px'>
-          <img src="data:image/png;base64,{_LOGO_B64}"
-               style="width:150px;filter:brightness(0) invert(1);margin-bottom:6px" />
-          <div style='font-size:12px;color:#475569;margin-top:4px'>Meta Ads Dashboard</div>
-        </div>""", unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style='text-align:center;padding:12px 0 4px'>
-          <span style='font-size:32px'>📊</span><br>
-          <span style='font-size:16px;font-weight:700;color:#f1f5f9'>Meta Ads</span><br>
-          <span style='font-size:12px;color:#475569'>Dashboard</span>
-        </div>""", unsafe_allow_html=True)
+    st.markdown("""
+    <div style='text-align:center;padding:12px 0 4px'>
+      <span style='font-size:32px'>📊</span><br>
+      <span style='font-size:16px;font-weight:700;color:#f1f5f9'>Meta Ads</span><br>
+      <span style='font-size:12px;color:#475569'>Dashboard</span>
+    </div>""", unsafe_allow_html=True)
     st.markdown("---")
 
     preset_label = st.selectbox("📅 Período", list(PRESETS.keys()), index=2)
@@ -233,15 +202,11 @@ with st.sidebar:
     with c1:
         if st.button("🔄 Atualizar"):
             with st.spinner("Buscando..."):
-                novo = fetch_report(date_preset)
-                if novo and novo.get("contas"):
-                    st.session_state[f"report_{date_preset}"] = novo
+                st.session_state["report"] = fetch_report(date_preset)
             st.success("Atualizado!")
     with c2:
         if st.button("📋 Cache"):
-            cached = load_report()
-            if cached and cached.get("contas"):
-                st.session_state[f"report_{cached.get('date_preset', date_preset)}"] = cached
+            st.session_state["report"] = load_report()
             st.success("Carregado!")
 
     st.markdown("---")
@@ -252,53 +217,26 @@ with st.sidebar:
     st.caption(f"🕒 {datetime.datetime.now():%d/%m/%Y %H:%M}")
 
 
-# ─── Pré-busca em background dos períodos mais usados ────────────────────────
-_PREFETCH = ["today", "yesterday", "last_14d", "last_30d", "this_month", "last_month", "maximum"]
-
-def _bg_prefetch(presets):
-    """Roda em thread separada — NÃO acessa st.session_state."""
-    for p in presets:
-        cached = load_report(p)
-        if cached and cached.get("contas") and _cache_is_fresh(cached):
-            continue  # cache fresco no disco, pula
-        try:
-            fetch_report(p)
-        except Exception:
-            pass
-
-if "prefetch_started" not in st.session_state:
-    st.session_state["prefetch_started"] = True
-    threading.Thread(target=_bg_prefetch, args=(_PREFETCH,), daemon=True).start()
-
-
 # ─── Carregar dados ──────────────────────────────────────────────────────────
-report_session_key = f"report_{date_preset}"
-
-if report_session_key not in st.session_state:
-    cached = load_report(date_preset)  # tenta cache do período específico
-    if cached and cached.get("contas"):
-        # Usa o cache (mesmo que antigo) — mostra os dados imediatamente
-        st.session_state[report_session_key] = cached
+if "report" not in st.session_state:
+    cached = load_report()
+    if cached:
+        st.session_state["report"] = cached
     else:
-        # Sem cache para este período → busca da API
-        with st.spinner(f"🔄 Carregando dados para '{preset_label}'..."):
-            try:
-                novo = fetch_report(date_preset)
-                if novo and novo.get("contas"):
-                    st.session_state[report_session_key] = novo
-            except Exception:
-                pass
+        st.markdown("""
+        <div style='text-align:center;padding:60px 20px'>
+          <span style='font-size:48px'>📡</span>
+          <h3 style='color:#64748b;margin-top:16px'>Nenhum relatório carregado</h3>
+          <p style='color:#475569'>Clique em <strong>Atualizar</strong> na barra lateral</p>
+        </div>""", unsafe_allow_html=True)
+        st.stop()
 
-if report_session_key not in st.session_state:
-    st.markdown("""
-    <div style='text-align:center;padding:60px 20px'>
-      <span style='font-size:48px'>📡</span>
-      <h3 style='color:#64748b;margin-top:16px'>Nenhum relatório carregado</h3>
-      <p style='color:#475569'>Clique em <strong>Atualizar</strong> na barra lateral</p>
-    </div>""", unsafe_allow_html=True)
-    st.stop()
+# Auto-busca quando o período selecionado é diferente do relatório em cache
+if st.session_state.get("report") and st.session_state["report"].get("date_preset") != date_preset:
+    with st.spinner(f"Buscando dados para '{preset_label}'..."):
+        st.session_state["report"] = fetch_report(date_preset)
 
-report = st.session_state[report_session_key]
+report = st.session_state["report"]
 if not report or not report.get("contas"):
     st.warning("Nenhuma conta com dados.")
     st.stop()
@@ -562,92 +500,74 @@ else:
             cols_html = st.columns(cols_per_row)
             for col_idx, (_, cr) in enumerate(row_df.iterrows()):
                 with cols_html[col_idx]:
-                    try:
-                        thumb    = str(cr.get("thumbnail_url") or "")
-                        roas_cr  = float(cr.get("roas") or 0)
-                        roas_cls = "green" if roas_cr>=3 else ("yellow" if roas_cr>=1 else "red")
-                        cpp_cr   = float(cr.get("custo_por_compra") or 0)
-                        ctr_cr   = float(cr.get("ctr") or 0)
-                        gasto_cr = float(cr.get("gasto") or 0)
-                        imp_cr   = int(cr.get("impressoes") or 0)
-                        clk_cr   = int(cr.get("cliques_link") or 0)
-                        cmp_cr   = int(cr.get("compras") or 0)
-                        msg_cr   = int(cr.get("conv_mensagens") or 0)
-                        cmsg_cr  = float(cr.get("custo_por_mensagem") or 0)
-                        rec_cr   = float(cr.get("receita") or 0)
-                        nome_raw = str(cr.get("ad_name") or "Sem nome")
-                        nome     = _html.escape(nome_raw[:42] + "..." if len(nome_raw) > 45 else nome_raw)
-                        nome_title = _html.escape(nome_raw, quote=True)
+                    thumb = cr.get("thumbnail_url","")
+                    roas_cr = cr.get("roas",0)
+                    roas_cls = "green" if roas_cr>=3 else ("yellow" if roas_cr>=1 else "red")
+                    cpp_cr = cr.get("custo_por_compra",0)
 
-                        if thumb and thumb.startswith("http"):
-                            thumb_html = f'<img src="{_html.escape(thumb, quote=True)}" class="creative-thumb" />'
-                        else:
-                            thumb_html = '<div class="creative-thumb-placeholder">🖼️</div>'
+                    # Thumbnail
+                    if thumb and thumb.startswith("http"):
+                        thumb_html = f'<img src="{thumb}" class="creative-thumb" />'
+                    else:
+                        thumb_html = '<div class="creative-thumb-placeholder">🖼️</div>'
 
-                        st.markdown(f"""
-                        <div class="creative-card">
-                          {thumb_html}
-                          <div class="creative-body">
-                            <div class="creative-name" title="{nome_title}">{nome}</div>
-                            <div class="creative-metric">
-                              <span class="cm-label">💸 Gasto</span>
-                              <span class="cm-value">{BRL(gasto_cr)}</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">👁 Impressões</span>
-                              <span class="cm-value">{NUM(imp_cr)}</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">🖱 Cliques</span>
-                              <span class="cm-value">{NUM(clk_cr)}</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">📊 CTR</span>
-                              <span class="cm-value">{ctr_cr:.2f}%</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">🛒 Compras</span>
-                              <span class="cm-value">{cmp_cr}</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">💲 CPP</span>
-                              <span class="cm-value">{BRL(cpp_cr) if cpp_cr>0 else "—"}</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">📈 ROAS</span>
-                              <span class="cm-value {roas_cls}">{roas_cr:.2f}x</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">💬 Conv. Mensagem</span>
-                              <span class="cm-value">{msg_cr}</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">💸 Custo/Mensagem</span>
-                              <span class="cm-value">{BRL(cmsg_cr) if cmsg_cr>0 else "—"}</span>
-                            </div>
-                            <div class="creative-metric">
-                              <span class="cm-label">💰 Receita</span>
-                              <span class="cm-value green">{BRL(rec_cr)}</span>
-                            </div>
-                          </div>
-                        </div>""", unsafe_allow_html=True)
-                    except Exception:
-                        st.warning("⚠️ Erro ao renderizar criativo.")
+                    nome = cr.get("ad_name","Sem nome")
+                    if len(nome) > 45:
+                        nome = nome[:42] + "..."
+
+                    st.markdown(f"""
+                    <div class="creative-card">
+                      {thumb_html}
+                      <div class="creative-body">
+                        <div class="creative-name" title="{cr.get('ad_name','')}">{nome}</div>
+                        <div class="creative-metric">
+                          <span class="cm-label">💸 Gasto</span>
+                          <span class="cm-value">{BRL(cr['gasto'])}</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">👁 Impressões</span>
+                          <span class="cm-value">{NUM(cr['impressoes'])}</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">🖱 Cliques</span>
+                          <span class="cm-value">{NUM(cr['cliques_link'])}</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">📊 CTR</span>
+                          <span class="cm-value">{cr.get('ctr',0):.2f}%</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">🛒 Compras</span>
+                          <span class="cm-value">{int(cr['compras'])}</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">💲 CPP</span>
+                          <span class="cm-value">{BRL(cpp_cr) if cpp_cr>0 else "—"}</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">📈 ROAS</span>
+                          <span class="cm-value {roas_cls}">{roas_cr:.2f}x</span>
+                        </div>
+                        <div class="creative-metric">
+                          <span class="cm-label">💰 Receita</span>
+                          <span class="cm-value green">{BRL(cr['receita'])}</span>
+                        </div>
+                      </div>
+                    </div>""", unsafe_allow_html=True)
     else:
         # Modo tabela
         cols_cr = {
             "ad_name":"Anúncio","campaign_name":"Campanha",
             "impressoes":"Impressões","cliques_link":"Cliques","ctr":"CTR %",
-            "frequencia":"Freq.","conv_mensagens":"Conv.Msg","custo_por_mensagem":"$/Msg",
-            "compras":"Compras","custo_por_compra":"$/Compra",
+            "frequencia":"Freq.","compras":"Compras","custo_por_compra":"$/Compra",
             "receita":"Receita","gasto":"Gasto","roas":"ROAS",
         }
         existing_cr = [c for c in cols_cr if c in df_cr_f.columns]
         df_cr_tbl   = df_cr_f[existing_cr].rename(columns=cols_cr)
         fmt_cr = {}
-        for c in ["Gasto","Receita","$/Compra","$/Msg"]:
+        for c in ["Gasto","Receita","$/Compra"]:
             if c in df_cr_tbl.columns: fmt_cr[c]="R$ {:,.2f}"
-        for c in ["Impressões","Cliques","Compras","Conv.Msg"]:
+        for c in ["Impressões","Cliques","Compras"]:
             if c in df_cr_tbl.columns: fmt_cr[c]="{:,.0f}"
         if "ROAS"  in df_cr_tbl.columns: fmt_cr["ROAS"] ="{:.2f}x"
         if "Freq." in df_cr_tbl.columns: fmt_cr["Freq."]="{:.2f}"
