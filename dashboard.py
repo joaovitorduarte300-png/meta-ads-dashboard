@@ -249,7 +249,15 @@ else:
     st.session_state[_cache_key] = report
 
 if not report or not report.get("contas"):
-    st.warning("⚠️ Nenhuma conta com dados para o período selecionado. Verifique o token ou tente outro período.")
+    st.error("⚠️ Nenhuma conta encontrada. Possíveis causas: token inválido/expirado, sem permissão nas contas ou sem dados no período.")
+    with st.expander("🔍 Detalhes do diagnóstico"):
+        import requests
+        tok_test = requests.get(
+            "https://graph.facebook.com/v21.0/me/adaccounts",
+            params={"access_token": __import__("report_generator").ACCESS_TOKEN,
+                    "fields": "id,name,account_status", "limit": 5}
+        ).json()
+        st.json(tok_test)
     st.stop()
 
 # ─── Seletor de conta ────────────────────────────────────────────────────────
