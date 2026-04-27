@@ -5,8 +5,12 @@ Executado toda segunda-feira às 08h ou sob demanda.
 import sys, json, os, datetime, requests
 
 ACCESS_TOKEN = "EAANTGkkCPMABRTXnFpAyBEO5XDkN5OAGZATrIiP9oWDjLBYiDbkNHbZBjYi7ZAZBZCKaNCAKy7HasxR9rf6JfSFU4zCseZCEZB9DBMGwF70ZAtitBNgqFCUfjZBUYNTY3PlkEPDeB3GzEXQZBMFbx3Vd1Pl3YD3H0YoFhjqqzRKdWC9bR4qd3apOqennZB1sgZDZD"
-BASE_URL   = "https://graph.facebook.com/v21.0"
-CACHE_FILE = os.path.join(os.path.dirname(__file__), "report_cache.json")
+BASE_URL    = "https://graph.facebook.com/v21.0"
+CACHE_DIR   = os.path.dirname(__file__)
+CACHE_TTL   = 1800  # 30 minutos
+
+def _cache_path(date_preset):
+    return os.path.join(CACHE_DIR, f"report_cache_{date_preset}.json")
 
 INSIGHT_FIELDS = (
     "reach,impressions,frequency,inline_link_clicks,spend,"
@@ -128,135 +132,140 @@ def fetch_report(date_preset="last_7d"):
     accounts_raw = _get_all("me/adaccounts", {
         "fields": "id,name,account_status,currency,amount_spent,balance"
     })
-    # Inclui contas ativas (1), em período de graça (9) e pendentes — exclui só fechadas (101)
     accounts = [a for a in accounts_raw if a.get("account_status") not in (2, 101, 100)]
     if not accounts:
-        accounts = accounts_raw  # fallback: usa todas se filtro retornar vazio
+        accounts = accounts_raw
+
+    if not accounts:
+        raise RuntimeError("Nenhuma conta de anúncios encontrada para este token.")
 
     report = {
         "gerado_em":   datetime.datetime.now().isoformat(),
         "date_preset": date_preset,
         "contas":      [],
+        "erros":       [],
     }
 
     for acc in accounts:
         aid  = acc["id"]
         nome = acc["name"]
+        try:
+            camp_insights = _get(f"{aid}/insights", {
+                "fields":      INSIGHT_FIELDS,
+                "date_preset": date_preset,
+                "level":       "campaign",
+            }).get("data", [])
 
-        # ── Insights por campanha ─────────────────────────────────────────
-        camp_insights = _get(f"{aid}/insights", {
-            "fields":      INSIGHT_FIELDS,
-            "date_preset": date_preset,
-            "level":       "campaign",
-        }).get("data", [])
+            adset_insights = _get(f"{aid}/insights", {
+                "fields":      INSIGHT_FIELDS,
+                "date_preset": date_preset,
+                "level":       "adset",
+            }).get("data", [])
 
-        # ── Insights por conjunto ─────────────────────────────────────────
-        adset_insights = _get(f"{aid}/insights", {
-            "fields":      INSIGHT_FIELDS,
-            "date_preset": date_preset,
-            "level":       "adset",
-        }).get("data", [])
+            ad_insights = _get(f"{aid}/insights", {
+                "fields":      AD_INSIGHT_FIELDS,
+                "date_preset": date_preset,
+                "level":       "ad",
+            }).get("data", [])
 
-        # ── Insights por anúncio (criativos) ─────────────────────────────
-        ad_insights = _get(f"{aid}/insights", {
-            "fields":      AD_INSIGHT_FIELDS,
-            "date_preset": date_preset,
-            "level":       "ad",
-        }).get("data", [])
-
-        # ── Metadados das campanhas ───────────────────────────────────────
-        campaigns_raw = _get_all(f"{aid}/campaigns", {
-            "fields": "id,name,status,objective,daily_budget,lifetime_budget"
-        })
-        camp_map = {c["id"]: c for c in campaigns_raw}
-
-        # ── Thumbnails dos criativos ──────────────────────────────────────
-        creative_map = _fetch_ad_creatives(aid)
-
-        # ── Processar campanhas ───────────────────────────────────────────
-        camp_metrics = []
-        for ci in camp_insights:
-            cid  = ci.get("campaign_id", "")
-            meta = camp_map.get(cid, {})
-            m    = _parse(ci, {
-                "campaign_id":   cid,
-                "campaign_name": ci.get("campaign_name", meta.get("name", "")),
-                "status":        meta.get("status", ""),
-                "objetivo":      meta.get("objective", ""),
+            campaigns_raw = _get_all(f"{aid}/campaigns", {
+                "fields": "id,name,status,objective,daily_budget,lifetime_budget"
             })
-            camp_metrics.append(m)
+            camp_map = {c["id"]: c for c in campaigns_raw}
 
-        # ── Processar conjuntos ───────────────────────────────────────────
-        adset_metrics = []
-        for ai_row in adset_insights:
-            m = _parse(ai_row, {
-                "adset_id":      ai_row.get("adset_id", ""),
-                "adset_name":    ai_row.get("adset_name", ""),
-                "campaign_name": ai_row.get("campaign_name", ""),
+            creative_map = _fetch_ad_creatives(aid)
+
+            camp_metrics = []
+            for ci in camp_insights:
+                cid  = ci.get("campaign_id", "")
+                meta = camp_map.get(cid, {})
+                camp_metrics.append(_parse(ci, {
+                    "campaign_id":   cid,
+                    "campaign_name": ci.get("campaign_name", meta.get("name", "")),
+                    "status":        meta.get("status", ""),
+                    "objetivo":      meta.get("objective", ""),
+                }))
+
+            adset_metrics = []
+            for ai_row in adset_insights:
+                adset_metrics.append(_parse(ai_row, {
+                    "adset_id":      ai_row.get("adset_id", ""),
+                    "adset_name":    ai_row.get("adset_name", ""),
+                    "campaign_name": ai_row.get("campaign_name", ""),
+                }))
+
+            ad_metrics = []
+            for ad_row in ad_insights:
+                ad_id = ad_row.get("ad_id", "")
+                info  = creative_map.get(ad_id, {})
+                ad_metrics.append(_parse(ad_row, {
+                    "ad_id":         ad_id,
+                    "ad_name":       ad_row.get("ad_name", info.get("ad_name", "")),
+                    "campaign_name": ad_row.get("campaign_name", ""),
+                    "adset_name":    ad_row.get("adset_name", ""),
+                    "thumbnail_url": info.get("thumbnail_url", ""),
+                    "creative_id":   info.get("creative_id", ""),
+                }))
+
+            t_gasto      = sum(m["gasto"]            for m in camp_metrics)
+            t_compras    = sum(m["compras"]           for m in camp_metrics)
+            t_receita    = sum(m["receita"]           for m in camp_metrics)
+            t_alcance    = sum(m["alcance"]           for m in camp_metrics)
+            t_impressoes = sum(m["impressoes"]        for m in camp_metrics)
+            t_cliques    = sum(m["cliques_link"]      for m in camp_metrics)
+            t_visitas_ig = sum(m["visitas_instagram"] for m in camp_metrics)
+            t_conv       = sum(m["conv_mensagens"]    for m in camp_metrics)
+
+            report["contas"].append({
+                "id":    aid,
+                "nome":  nome,
+                "moeda": acc.get("currency", "BRL"),
+                "totais": {
+                    "alcance":            t_alcance,
+                    "impressoes":         t_impressoes,
+                    "cliques_link":       t_cliques,
+                    "visitas_instagram":  t_visitas_ig,
+                    "conv_mensagens":     t_conv,
+                    "custo_por_mensagem": round(t_gasto / t_conv, 2) if t_conv > 0 else 0,
+                    "compras":            t_compras,
+                    "custo_por_compra":   round(t_gasto / t_compras, 2) if t_compras > 0 else 0,
+                    "receita":            round(t_receita, 2),
+                    "gasto":              round(t_gasto, 2),
+                    "roas":               round(t_receita / t_gasto, 2) if t_gasto > 0 else 0,
+                },
+                "campanhas": camp_metrics,
+                "conjuntos": adset_metrics,
+                "criativos": ad_metrics,
             })
-            adset_metrics.append(m)
+        except Exception as e:
+            report["erros"].append(f"{nome} ({aid}): {e}")
 
-        # ── Processar anúncios / criativos ────────────────────────────────
-        ad_metrics = []
-        for ad_row in ad_insights:
-            ad_id = ad_row.get("ad_id", "")
-            info  = creative_map.get(ad_id, {})
-            m = _parse(ad_row, {
-                "ad_id":          ad_id,
-                "ad_name":        ad_row.get("ad_name", info.get("ad_name", "")),
-                "campaign_name":  ad_row.get("campaign_name", ""),
-                "adset_name":     ad_row.get("adset_name", ""),
-                "thumbnail_url":  info.get("thumbnail_url", ""),
-                "creative_id":    info.get("creative_id", ""),
-            })
-            ad_metrics.append(m)
-
-        # ── Totais da conta ───────────────────────────────────────────────
-        t_gasto      = sum(m["gasto"]             for m in camp_metrics)
-        t_compras    = sum(m["compras"]            for m in camp_metrics)
-        t_receita    = sum(m["receita"]            for m in camp_metrics)
-        t_alcance    = sum(m["alcance"]            for m in camp_metrics)
-        t_impressoes = sum(m["impressoes"]         for m in camp_metrics)
-        t_cliques    = sum(m["cliques_link"]       for m in camp_metrics)
-        t_visitas_ig = sum(m["visitas_instagram"]  for m in camp_metrics)
-        t_conv       = sum(m["conv_mensagens"]     for m in camp_metrics)
-        t_cpp        = round(t_gasto / t_compras, 2)  if t_compras > 0 else 0
-        t_custo_msg  = round(t_gasto / t_conv, 2)     if t_conv > 0    else 0
-        t_roas       = round(t_receita / t_gasto, 2)  if t_gasto > 0   else 0
-
-        report["contas"].append({
-            "id":    aid,
-            "nome":  nome,
-            "moeda": acc.get("currency", "BRL"),
-            "totais": {
-                "alcance":            t_alcance,
-                "impressoes":         t_impressoes,
-                "cliques_link":       t_cliques,
-                "visitas_instagram":  t_visitas_ig,
-                "conv_mensagens":     t_conv,
-                "custo_por_mensagem": t_custo_msg,
-                "compras":            t_compras,
-                "custo_por_compra":   t_cpp,
-                "receita":            round(t_receita, 2),
-                "gasto":              round(t_gasto, 2),
-                "roas":               t_roas,
-            },
-            "campanhas":  camp_metrics,
-            "conjuntos":  adset_metrics,
-            "criativos":  ad_metrics,
-        })
-
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+    # Salva cache por período
+    cache_path = _cache_path(date_preset)
+    with open(cache_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
+    # Mantém report_cache.json compatível para last_7d
+    if date_preset == "last_7d":
+        legacy = os.path.join(CACHE_DIR, "report_cache.json")
+        with open(legacy, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
 
     return report
 
 
-def load_report():
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return None
+def load_report(date_preset="last_7d"):
+    path = _cache_path(date_preset)
+    # Fallback para o arquivo legado no caso de last_7d
+    if not os.path.exists(path) and date_preset == "last_7d":
+        path = os.path.join(CACHE_DIR, "report_cache.json")
+    if not os.path.exists(path):
+        return None
+    # Cache expirado (> 30 min) retorna None para forçar nova busca
+    age = datetime.datetime.now().timestamp() - os.path.getmtime(path)
+    if age > CACHE_TTL:
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 if __name__ == "__main__":

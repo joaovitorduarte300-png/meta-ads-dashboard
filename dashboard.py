@@ -12,10 +12,6 @@ import plotly.express as px
 import pandas as pd
 from report_generator import fetch_report, load_report
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def cached_fetch(date_preset):
-    return fetch_report(date_preset)
-
 st.set_page_config(
     page_title="Meta Ads Dashboard",
     page_icon="📊",
@@ -205,17 +201,15 @@ with st.sidebar:
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🔄 Atualizar"):
-            # Limpa cache desse período e força nova busca
-            cached_fetch.clear()
             _key = f"report_{date_preset}"
             if _key in st.session_state:
                 del st.session_state[_key]
             st.rerun()
     with c2:
         if st.button("📋 Cache"):
-            r = load_report()
+            r = load_report(date_preset)
             if r:
-                st.session_state[f"report_{r.get('date_preset','last_7d')}"] = r
+                st.session_state[f"report_{date_preset}"] = r
             st.rerun()
 
     st.markdown("---")
@@ -227,38 +221,38 @@ with st.sidebar:
 
 
 # ─── Carregar dados ──────────────────────────────────────────────────────────
-# Sempre usa cache_data por período — busca da API só na primeira vez ou após 30min
-report = None
 _cache_key = f"report_{date_preset}"
+report = st.session_state.get(_cache_key)
 
-if _cache_key in st.session_state:
-    report = st.session_state[_cache_key]
-else:
-    # Tenta carregar do disco se for last_7d (cache padrão salvo em arquivo)
-    if date_preset == "last_7d":
-        report = load_report()
+if not report:
+    # Tenta cache em arquivo (válido por 30 min)
+    report = load_report(date_preset)
 
-    if not report:
-        with st.spinner(f"⏳ Buscando dados para '{preset_label}'..."):
-            try:
-                report = cached_fetch(date_preset)
-            except Exception as e:
-                st.error(f"Erro ao buscar dados: {e}")
-                st.stop()
+if not report:
+    with st.spinner(f"⏳ Buscando dados para '{preset_label}'..."):
+        try:
+            report = fetch_report(date_preset)
+        except Exception as e:
+            st.error(f"❌ Erro ao buscar dados da API: {e}")
+            st.stop()
 
-    st.session_state[_cache_key] = report
+st.session_state[_cache_key] = report
 
 if not report or not report.get("contas"):
-    st.error("⚠️ Nenhuma conta encontrada. Possíveis causas: token inválido/expirado, sem permissão nas contas ou sem dados no período.")
-    with st.expander("🔍 Detalhes do diagnóstico"):
-        import requests
-        tok_test = requests.get(
-            "https://graph.facebook.com/v21.0/me/adaccounts",
-            params={"access_token": __import__("report_generator").ACCESS_TOKEN,
-                    "fields": "id,name,account_status", "limit": 5}
-        ).json()
-        st.json(tok_test)
+    erros = (report or {}).get("erros", [])
+    st.error("⚠️ Nenhuma conta retornou dados para este período.")
+    if erros:
+        with st.expander("🔍 Erros por conta"):
+            for e in erros:
+                st.write(e)
+    st.info("Tente outro período ou clique em **Atualizar**.")
     st.stop()
+
+# Mostra erros parciais sem bloquear o dashboard
+if report.get("erros"):
+    with st.expander(f"⚠️ {len(report['erros'])} conta(s) com erro ao buscar dados"):
+        for e in report["erros"]:
+            st.write(e)
 
 # ─── Seletor de conta ────────────────────────────────────────────────────────
 contas_nomes = [c["nome"] for c in report["contas"]]
