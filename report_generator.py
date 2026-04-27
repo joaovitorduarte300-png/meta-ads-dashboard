@@ -128,7 +128,10 @@ def fetch_report(date_preset="last_7d"):
     accounts_raw = _get_all("me/adaccounts", {
         "fields": "id,name,account_status,currency,amount_spent,balance"
     })
-    accounts = [a for a in accounts_raw if a.get("account_status") == 1]
+    # Inclui contas ativas (1), em período de graça (9) e pendentes — exclui só fechadas (101)
+    accounts = [a for a in accounts_raw if a.get("account_status") not in (2, 101, 100)]
+    if not accounts:
+        accounts = accounts_raw  # fallback: usa todas se filtro retornar vazio
 
     report = {
         "gerado_em":   datetime.datetime.now().isoformat(),

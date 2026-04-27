@@ -12,6 +12,10 @@ import plotly.express as px
 import pandas as pd
 from report_generator import fetch_report, load_report
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def cached_fetch(date_preset):
+    return fetch_report(date_preset)
+
 st.set_page_config(
     page_title="Meta Ads Dashboard",
     page_icon="📊",
@@ -201,13 +205,18 @@ with st.sidebar:
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🔄 Atualizar"):
-            with st.spinner("Buscando..."):
-                st.session_state["report"] = fetch_report(date_preset)
-            st.success("Atualizado!")
+            # Limpa cache desse período e força nova busca
+            cached_fetch.clear()
+            _key = f"report_{date_preset}"
+            if _key in st.session_state:
+                del st.session_state[_key]
+            st.rerun()
     with c2:
         if st.button("📋 Cache"):
-            st.session_state["report"] = load_report()
-            st.success("Carregado!")
+            r = load_report()
+            if r:
+                st.session_state[f"report_{r.get('date_preset','last_7d')}"] = r
+            st.rerun()
 
     st.markdown("---")
     if os.getenv("ANTHROPIC_API_KEY"):
@@ -218,27 +227,29 @@ with st.sidebar:
 
 
 # ─── Carregar dados ──────────────────────────────────────────────────────────
-if "report" not in st.session_state:
-    cached = load_report()
-    if cached:
-        st.session_state["report"] = cached
-    else:
-        st.markdown("""
-        <div style='text-align:center;padding:60px 20px'>
-          <span style='font-size:48px'>📡</span>
-          <h3 style='color:#64748b;margin-top:16px'>Nenhum relatório carregado</h3>
-          <p style='color:#475569'>Clique em <strong>Atualizar</strong> na barra lateral</p>
-        </div>""", unsafe_allow_html=True)
-        st.stop()
+# Sempre usa cache_data por período — busca da API só na primeira vez ou após 30min
+report = None
+_cache_key = f"report_{date_preset}"
 
-# Auto-busca quando o período selecionado é diferente do relatório em cache
-if st.session_state.get("report") and st.session_state["report"].get("date_preset") != date_preset:
-    with st.spinner(f"Buscando dados para '{preset_label}'..."):
-        st.session_state["report"] = fetch_report(date_preset)
+if _cache_key in st.session_state:
+    report = st.session_state[_cache_key]
+else:
+    # Tenta carregar do disco se for last_7d (cache padrão salvo em arquivo)
+    if date_preset == "last_7d":
+        report = load_report()
 
-report = st.session_state["report"]
+    if not report:
+        with st.spinner(f"⏳ Buscando dados para '{preset_label}'..."):
+            try:
+                report = cached_fetch(date_preset)
+            except Exception as e:
+                st.error(f"Erro ao buscar dados: {e}")
+                st.stop()
+
+    st.session_state[_cache_key] = report
+
 if not report or not report.get("contas"):
-    st.warning("Nenhuma conta com dados.")
+    st.warning("⚠️ Nenhuma conta com dados para o período selecionado. Verifique o token ou tente outro período.")
     st.stop()
 
 # ─── Seletor de conta ────────────────────────────────────────────────────────
