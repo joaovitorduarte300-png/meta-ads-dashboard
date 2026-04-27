@@ -10,7 +10,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
-from report_generator import fetch_report, load_report
+from report_generator import fetch_report, load_report, get_accounts
 
 st.set_page_config(
     page_title="Meta Ads Dashboard",
@@ -241,7 +241,16 @@ if not report:
             report = fetch_report(date_preset)
             st.session_state[_cache_key] = report
         except Exception as e:
-            st.error(f"❌ Erro ao buscar dados da API: {e}")
+            st.error(f"❌ Erro ao buscar dados da API:")
+            st.code(str(e))
+            # Diagnóstico rápido: mostra a resposta bruta da API de contas
+            with st.expander("🔍 Diagnóstico da API"):
+                try:
+                    accs, raw = get_accounts()
+                    st.write(f"**Contas encontradas:** {len(accs)}")
+                    st.json(raw)
+                except Exception as e2:
+                    st.write(f"Falha no diagnóstico: {e2}")
             st.stop()
 
 if not report or not report.get("contas"):

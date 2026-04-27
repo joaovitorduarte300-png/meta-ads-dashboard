@@ -5,7 +5,7 @@ import sys, json, os, datetime, requests
 
 ACCESS_TOKEN = "EAANTGkkCPMABRTXnFpAyBEO5XDkN5OAGZATrIiP9oWDjLBYiDbkNHbZBjYi7ZAZBZCKaNCAKy7HasxR9rf6JfSFU4zCseZCEZB9DBMGwF70ZAtitBNgqFCUfjZBUYNTY3PlkEPDeB3GzEXQZBMFbx3Vd1Pl3YD3H0YoFhjqqzRKdWC9bR4qd3apOqennZB1sgZDZD"
 BASE_URL  = "https://graph.facebook.com/v21.0"
-CACHE_DIR = os.path.dirname(__file__)
+CACHE_DIR = os.path.dirname(__file__) or "."
 
 INSIGHT_FIELDS = (
     "reach,impressions,frequency,inline_link_clicks,spend,"
@@ -24,14 +24,22 @@ def _cache_path(date_preset):
 
 
 def _get(endpoint, params=None):
+    url = f"{BASE_URL}/{endpoint.lstrip('/')}"
     p = {"access_token": ACCESS_TOKEN}
     if params:
         p.update(params)
-    r = requests.get(f"{BASE_URL}/{endpoint.lstrip('/')}", params=p, timeout=30)
-    data = r.json()
+    try:
+        r = requests.get(url, params=p, timeout=30)
+        data = r.json()
+    except requests.exceptions.Timeout:
+        raise RuntimeError(f"Timeout ao chamar '{endpoint}'")
+    except Exception as e:
+        raise RuntimeError(f"Erro de rede em '{endpoint}': {e}")
     if "error" in data:
-        msg = data["error"].get("message", str(data["error"]))
-        raise RuntimeError(f"Meta API erro em '{endpoint}': {msg}")
+        err = data["error"]
+        raise RuntimeError(
+            f"Meta API erro {err.get('code','?')} em '{endpoint}': {err.get('message', err)}"
+        )
     return data
 
 
@@ -40,11 +48,14 @@ def _get_all(endpoint, params=None):
     data = list(result.get("data", []))
     paging = result.get("paging", {})
     while "next" in paging:
-        r = requests.get(paging["next"], timeout=30).json()
-        if "error" in r:
+        try:
+            r = requests.get(paging["next"], timeout=30).json()
+            if "error" in r:
+                break
+            data.extend(r.get("data", []))
+            paging = r.get("paging", {})
+        except Exception:
             break
-        data.extend(r.get("data", []))
-        paging = r.get("paging", {})
     return data
 
 
@@ -122,18 +133,36 @@ def _fetch_ad_creatives(aid):
         return {}
 
 
-def fetch_report(date_preset="last_7d"):
-    # Busca contas — apenas campos básicos para evitar erros de permissão
-    accounts_raw = _get_all("me/adaccounts", {"fields": "id,name,account_status,currency"})
+def get_accounts():
+    """Retorna lista de contas de anúncios e a resposta bruta da API para debug."""
+    raw = _get("me/adaccounts", {"fields": "id,name,account_status", "limit": 200})
+    accounts_raw = raw.get("data", [])
+    # Pagina manualmente se houver mais contas
+    paging = raw.get("paging", {})
+    while "next" in paging:
+        try:
+            r = requests.get(paging["next"], timeout=30).json()
+            if "error" in r:
+                break
+            accounts_raw.extend(r.get("data", []))
+            paging = r.get("paging", {})
+        except Exception:
+            break
+    return accounts_raw, raw
 
-    # Filtra contas fechadas/desativadas; fallback: usa todas se filtro zerar
+
+def fetch_report(date_preset="last_7d"):
+    accounts_raw, raw_response = get_accounts()
+
+    if not accounts_raw:
+        raise RuntimeError(
+            f"API retornou 0 contas. Resposta: {json.dumps(raw_response)[:800]}"
+        )
+
+    # Usa todas as contas exceto fechadas/desativadas
     accounts = [a for a in accounts_raw if a.get("account_status") not in (2, 101, 100)]
     if not accounts:
         accounts = accounts_raw
-    if not accounts:
-        raise RuntimeError(
-            "Nenhuma conta retornada pela API. Verifique se o token tem permissão 'ads_read'."
-        )
 
     report = {
         "gerado_em":   datetime.datetime.now().isoformat(),
@@ -165,9 +194,10 @@ def fetch_report(date_preset="last_7d"):
             camp_metrics = [
                 _parse(ci, {
                     "campaign_id":   ci.get("campaign_id", ""),
-                    "campaign_name": ci.get("campaign_name", camp_map.get(ci.get("campaign_id",""), {}).get("name", "")),
-                    "status":        camp_map.get(ci.get("campaign_id",""), {}).get("status", ""),
-                    "objetivo":      camp_map.get(ci.get("campaign_id",""), {}).get("objective", ""),
+                    "campaign_name": ci.get("campaign_name",
+                                           camp_map.get(ci.get("campaign_id", ""), {}).get("name", "")),
+                    "status":        camp_map.get(ci.get("campaign_id", ""), {}).get("status", ""),
+                    "objetivo":      camp_map.get(ci.get("campaign_id", ""), {}).get("objective", ""),
                 }) for ci in camp_insights
             ]
             adset_metrics = [
@@ -180,11 +210,12 @@ def fetch_report(date_preset="last_7d"):
             ad_metrics = [
                 _parse(r, {
                     "ad_id":         r.get("ad_id", ""),
-                    "ad_name":       r.get("ad_name", creative_map.get(r.get("ad_id",""), {}).get("ad_name", "")),
+                    "ad_name":       r.get("ad_name",
+                                          creative_map.get(r.get("ad_id", ""), {}).get("ad_name", "")),
                     "campaign_name": r.get("campaign_name", ""),
                     "adset_name":    r.get("adset_name", ""),
-                    "thumbnail_url": creative_map.get(r.get("ad_id",""), {}).get("thumbnail_url", ""),
-                    "creative_id":   creative_map.get(r.get("ad_id",""), {}).get("creative_id", ""),
+                    "thumbnail_url": creative_map.get(r.get("ad_id", ""), {}).get("thumbnail_url", ""),
+                    "creative_id":   creative_map.get(r.get("ad_id", ""), {}).get("creative_id", ""),
                 }) for r in ad_insights
             ]
 
@@ -221,26 +252,32 @@ def fetch_report(date_preset="last_7d"):
         except Exception as e:
             report["erros"].append(f"{nome} ({aid}): {e}")
 
-    # Salva cache por período (sem expiração — o usuário decide quando atualizar)
-    with open(_cache_path(date_preset), "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-    # Mantém report_cache.json para compatibilidade
-    if date_preset == "last_7d":
-        with open(os.path.join(CACHE_DIR, "report_cache.json"), "w", encoding="utf-8") as f:
+    # Salva cache em arquivo por período
+    try:
+        with open(_cache_path(date_preset), "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
+        if date_preset == "last_7d":
+            with open(os.path.join(CACHE_DIR, "report_cache.json"), "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # erro de escrita não deve quebrar o dashboard
 
     return report
 
 
 def load_report(date_preset="last_7d"):
     """Carrega cache do período. Retorna None se não existir."""
-    path = _cache_path(date_preset)
-    if not os.path.exists(path) and date_preset == "last_7d":
-        path = os.path.join(CACHE_DIR, "report_cache.json")
-    if not os.path.exists(path):
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    for path in [_cache_path(date_preset),
+                 os.path.join(CACHE_DIR, "report_cache.json")]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data.get("date_preset") == date_preset and data.get("contas"):
+                    return data
+            except Exception:
+                continue
+    return None
 
 
 if __name__ == "__main__":
