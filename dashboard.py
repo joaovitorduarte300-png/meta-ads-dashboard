@@ -201,15 +201,17 @@ with st.sidebar:
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🔄 Atualizar"):
-            _key = f"report_{date_preset}"
-            if _key in st.session_state:
-                del st.session_state[_key]
+            # Remove do session state para forçar nova busca na API
+            st.session_state.pop(f"report_{date_preset}", None)
             st.rerun()
     with c2:
         if st.button("📋 Cache"):
             r = load_report(date_preset)
             if r:
                 st.session_state[f"report_{date_preset}"] = r
+                st.success("Cache carregado!")
+            else:
+                st.warning("Sem cache para este período.")
             st.rerun()
 
     st.markdown("---")
@@ -222,21 +224,25 @@ with st.sidebar:
 
 # ─── Carregar dados ──────────────────────────────────────────────────────────
 _cache_key = f"report_{date_preset}"
+
+# 1) session state (mais rápido — memória da sessão atual)
 report = st.session_state.get(_cache_key)
 
+# 2) cache em arquivo (persiste entre sessões, sem expiração automática)
 if not report:
-    # Tenta cache em arquivo (válido por 30 min)
     report = load_report(date_preset)
+    if report:
+        st.session_state[_cache_key] = report
 
+# 3) busca na API do Meta
 if not report:
     with st.spinner(f"⏳ Buscando dados para '{preset_label}'..."):
         try:
             report = fetch_report(date_preset)
+            st.session_state[_cache_key] = report
         except Exception as e:
             st.error(f"❌ Erro ao buscar dados da API: {e}")
             st.stop()
-
-st.session_state[_cache_key] = report
 
 if not report or not report.get("contas"):
     erros = (report or {}).get("erros", [])

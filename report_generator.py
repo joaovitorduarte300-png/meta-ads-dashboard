@@ -1,23 +1,17 @@
 """
 Gerador de relatórios Meta Ads — busca dados e salva JSON/cache para o dashboard.
-Executado toda segunda-feira às 08h ou sob demanda.
 """
 import sys, json, os, datetime, requests
 
 ACCESS_TOKEN = "EAANTGkkCPMABRTXnFpAyBEO5XDkN5OAGZATrIiP9oWDjLBYiDbkNHbZBjYi7ZAZBZCKaNCAKy7HasxR9rf6JfSFU4zCseZCEZB9DBMGwF70ZAtitBNgqFCUfjZBUYNTY3PlkEPDeB3GzEXQZBMFbx3Vd1Pl3YD3H0YoFhjqqzRKdWC9bR4qd3apOqennZB1sgZDZD"
-BASE_URL    = "https://graph.facebook.com/v21.0"
-CACHE_DIR   = os.path.dirname(__file__)
-CACHE_TTL   = 1800  # 30 minutos
-
-def _cache_path(date_preset):
-    return os.path.join(CACHE_DIR, f"report_cache_{date_preset}.json")
+BASE_URL  = "https://graph.facebook.com/v21.0"
+CACHE_DIR = os.path.dirname(__file__)
 
 INSIGHT_FIELDS = (
     "reach,impressions,frequency,inline_link_clicks,spend,"
     "actions,cost_per_action_type,action_values,cpc,cpm,ctr,"
     "campaign_id,campaign_name,adset_id,adset_name"
 )
-
 AD_INSIGHT_FIELDS = (
     "reach,impressions,frequency,inline_link_clicks,spend,"
     "actions,cost_per_action_type,action_values,cpc,cpm,ctr,"
@@ -25,22 +19,32 @@ AD_INSIGHT_FIELDS = (
 )
 
 
+def _cache_path(date_preset):
+    return os.path.join(CACHE_DIR, f"report_cache_{date_preset}.json")
+
+
 def _get(endpoint, params=None):
     p = {"access_token": ACCESS_TOKEN}
     if params:
         p.update(params)
-    r = requests.get(f"{BASE_URL}/{endpoint.lstrip('/')}", params=p)
-    return r.json()
+    r = requests.get(f"{BASE_URL}/{endpoint.lstrip('/')}", params=p, timeout=30)
+    data = r.json()
+    if "error" in data:
+        msg = data["error"].get("message", str(data["error"]))
+        raise RuntimeError(f"Meta API erro em '{endpoint}': {msg}")
+    return data
 
 
 def _get_all(endpoint, params=None):
-    data, result = [], _get(endpoint, params)
-    data.extend(result.get("data", []))
+    result = _get(endpoint, params)
+    data = list(result.get("data", []))
     paging = result.get("paging", {})
     while "next" in paging:
-        result = requests.get(paging["next"]).json()
-        data.extend(result.get("data", []))
-        paging = result.get("paging", {})
+        r = requests.get(paging["next"], timeout=30).json()
+        if "error" in r:
+            break
+        data.extend(r.get("data", []))
+        paging = r.get("paging", {})
     return data
 
 
@@ -57,24 +61,21 @@ def _parse(raw, extra=None):
     costs   = raw.get("cost_per_action_type", [])
     values  = raw.get("action_values", [])
 
-    compras     = _action(actions, "purchase")
-    conv_msg    = _action(actions, "onsite_conversion.messaging_conversation_started_7d")
-    # Visitas ao perfil do Instagram (tenta múltiplos action types)
-    visitas_ig  = (
+    compras    = _action(actions, "purchase")
+    conv_msg   = _action(actions, "onsite_conversion.messaging_conversation_started_7d")
+    visitas_ig = (
         _action(actions, "instagram_profile_visit") or
         _action(actions, "onsite_conversion.flow_complete") or
         _action(actions, "page_engagement")
     )
-    cpp         = _cost(costs, "purchase")
-    custo_msg   = _cost(costs, "onsite_conversion.messaging_conversation_started_7d")
-    receita     = _action(values, "purchase")
-    gasto       = float(raw.get("spend", 0) or 0)
-    impressoes  = int(raw.get("impressions", 0) or 0)
-    alcance     = int(raw.get("reach", 0) or 0)
+    cpp       = _cost(costs, "purchase")
+    custo_msg = _cost(costs, "onsite_conversion.messaging_conversation_started_7d")
+    receita   = _action(values, "purchase")
+    gasto     = float(raw.get("spend", 0) or 0)
 
     m = {
-        "alcance":            alcance,
-        "impressoes":         impressoes,
+        "alcance":            int(raw.get("reach", 0) or 0),
+        "impressoes":         int(raw.get("impressions", 0) or 0),
         "frequencia":         round(float(raw.get("frequency", 0) or 0), 2),
         "cliques_link":       int(raw.get("inline_link_clicks", 0) or 0),
         "visitas_instagram":  int(visitas_ig),
@@ -95,7 +96,6 @@ def _parse(raw, extra=None):
 
 
 def _fetch_ad_creatives(aid):
-    """Busca anúncios com URL de thumbnail do criativo."""
     try:
         ads = _get_all(f"{aid}/ads", {
             "fields": "id,name,status,creative{id,thumbnail_url,object_story_spec,image_url}",
@@ -104,19 +104,13 @@ def _fetch_ad_creatives(aid):
         resultado = {}
         for ad in ads:
             creative = ad.get("creative", {})
-            thumb = (
-                creative.get("thumbnail_url") or
-                creative.get("image_url") or
-                ""
-            )
-            # Tenta pegar imagem do object_story_spec se não tiver thumbnail
+            thumb = creative.get("thumbnail_url") or creative.get("image_url") or ""
             if not thumb:
                 oss = creative.get("object_story_spec", {})
                 if "video_data" in oss:
                     thumb = oss["video_data"].get("image_url", "")
                 elif "link_data" in oss:
                     thumb = oss["link_data"].get("image_hash", "")
-
             resultado[ad["id"]] = {
                 "creative_id":   creative.get("id", ""),
                 "thumbnail_url": thumb,
@@ -129,15 +123,17 @@ def _fetch_ad_creatives(aid):
 
 
 def fetch_report(date_preset="last_7d"):
-    accounts_raw = _get_all("me/adaccounts", {
-        "fields": "id,name,account_status,currency,amount_spent,balance"
-    })
+    # Busca contas — apenas campos básicos para evitar erros de permissão
+    accounts_raw = _get_all("me/adaccounts", {"fields": "id,name,account_status,currency"})
+
+    # Filtra contas fechadas/desativadas; fallback: usa todas se filtro zerar
     accounts = [a for a in accounts_raw if a.get("account_status") not in (2, 101, 100)]
     if not accounts:
         accounts = accounts_raw
-
     if not accounts:
-        raise RuntimeError("Nenhuma conta de anúncios encontrada para este token.")
+        raise RuntimeError(
+            "Nenhuma conta retornada pela API. Verifique se o token tem permissão 'ads_read'."
+        )
 
     report = {
         "gerado_em":   datetime.datetime.now().isoformat(),
@@ -150,62 +146,47 @@ def fetch_report(date_preset="last_7d"):
         aid  = acc["id"]
         nome = acc["name"]
         try:
-            camp_insights = _get(f"{aid}/insights", {
-                "fields":      INSIGHT_FIELDS,
-                "date_preset": date_preset,
-                "level":       "campaign",
+            camp_insights  = _get(f"{aid}/insights", {
+                "fields": INSIGHT_FIELDS, "date_preset": date_preset, "level": "campaign",
             }).get("data", [])
-
             adset_insights = _get(f"{aid}/insights", {
-                "fields":      INSIGHT_FIELDS,
-                "date_preset": date_preset,
-                "level":       "adset",
+                "fields": INSIGHT_FIELDS, "date_preset": date_preset, "level": "adset",
+            }).get("data", [])
+            ad_insights    = _get(f"{aid}/insights", {
+                "fields": AD_INSIGHT_FIELDS, "date_preset": date_preset, "level": "ad",
             }).get("data", [])
 
-            ad_insights = _get(f"{aid}/insights", {
-                "fields":      AD_INSIGHT_FIELDS,
-                "date_preset": date_preset,
-                "level":       "ad",
-            }).get("data", [])
-
-            campaigns_raw = _get_all(f"{aid}/campaigns", {
+            campaigns_raw  = _get_all(f"{aid}/campaigns", {
                 "fields": "id,name,status,objective,daily_budget,lifetime_budget"
             })
-            camp_map = {c["id"]: c for c in campaigns_raw}
-
+            camp_map     = {c["id"]: c for c in campaigns_raw}
             creative_map = _fetch_ad_creatives(aid)
 
-            camp_metrics = []
-            for ci in camp_insights:
-                cid  = ci.get("campaign_id", "")
-                meta = camp_map.get(cid, {})
-                camp_metrics.append(_parse(ci, {
-                    "campaign_id":   cid,
-                    "campaign_name": ci.get("campaign_name", meta.get("name", "")),
-                    "status":        meta.get("status", ""),
-                    "objetivo":      meta.get("objective", ""),
-                }))
-
-            adset_metrics = []
-            for ai_row in adset_insights:
-                adset_metrics.append(_parse(ai_row, {
-                    "adset_id":      ai_row.get("adset_id", ""),
-                    "adset_name":    ai_row.get("adset_name", ""),
-                    "campaign_name": ai_row.get("campaign_name", ""),
-                }))
-
-            ad_metrics = []
-            for ad_row in ad_insights:
-                ad_id = ad_row.get("ad_id", "")
-                info  = creative_map.get(ad_id, {})
-                ad_metrics.append(_parse(ad_row, {
-                    "ad_id":         ad_id,
-                    "ad_name":       ad_row.get("ad_name", info.get("ad_name", "")),
-                    "campaign_name": ad_row.get("campaign_name", ""),
-                    "adset_name":    ad_row.get("adset_name", ""),
-                    "thumbnail_url": info.get("thumbnail_url", ""),
-                    "creative_id":   info.get("creative_id", ""),
-                }))
+            camp_metrics = [
+                _parse(ci, {
+                    "campaign_id":   ci.get("campaign_id", ""),
+                    "campaign_name": ci.get("campaign_name", camp_map.get(ci.get("campaign_id",""), {}).get("name", "")),
+                    "status":        camp_map.get(ci.get("campaign_id",""), {}).get("status", ""),
+                    "objetivo":      camp_map.get(ci.get("campaign_id",""), {}).get("objective", ""),
+                }) for ci in camp_insights
+            ]
+            adset_metrics = [
+                _parse(r, {
+                    "adset_id":      r.get("adset_id", ""),
+                    "adset_name":    r.get("adset_name", ""),
+                    "campaign_name": r.get("campaign_name", ""),
+                }) for r in adset_insights
+            ]
+            ad_metrics = [
+                _parse(r, {
+                    "ad_id":         r.get("ad_id", ""),
+                    "ad_name":       r.get("ad_name", creative_map.get(r.get("ad_id",""), {}).get("ad_name", "")),
+                    "campaign_name": r.get("campaign_name", ""),
+                    "adset_name":    r.get("adset_name", ""),
+                    "thumbnail_url": creative_map.get(r.get("ad_id",""), {}).get("thumbnail_url", ""),
+                    "creative_id":   creative_map.get(r.get("ad_id",""), {}).get("creative_id", ""),
+                }) for r in ad_insights
+            ]
 
             t_gasto      = sum(m["gasto"]            for m in camp_metrics)
             t_compras    = sum(m["compras"]           for m in camp_metrics)
@@ -226,12 +207,12 @@ def fetch_report(date_preset="last_7d"):
                     "cliques_link":       t_cliques,
                     "visitas_instagram":  t_visitas_ig,
                     "conv_mensagens":     t_conv,
-                    "custo_por_mensagem": round(t_gasto / t_conv, 2) if t_conv > 0 else 0,
+                    "custo_por_mensagem": round(t_gasto / t_conv, 2)    if t_conv    > 0 else 0,
                     "compras":            t_compras,
                     "custo_por_compra":   round(t_gasto / t_compras, 2) if t_compras > 0 else 0,
                     "receita":            round(t_receita, 2),
                     "gasto":              round(t_gasto, 2),
-                    "roas":               round(t_receita / t_gasto, 2) if t_gasto > 0 else 0,
+                    "roas":               round(t_receita / t_gasto, 2) if t_gasto   > 0 else 0,
                 },
                 "campanhas": camp_metrics,
                 "conjuntos": adset_metrics,
@@ -240,29 +221,23 @@ def fetch_report(date_preset="last_7d"):
         except Exception as e:
             report["erros"].append(f"{nome} ({aid}): {e}")
 
-    # Salva cache por período
-    cache_path = _cache_path(date_preset)
-    with open(cache_path, "w", encoding="utf-8") as f:
+    # Salva cache por período (sem expiração — o usuário decide quando atualizar)
+    with open(_cache_path(date_preset), "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    # Mantém report_cache.json compatível para last_7d
+    # Mantém report_cache.json para compatibilidade
     if date_preset == "last_7d":
-        legacy = os.path.join(CACHE_DIR, "report_cache.json")
-        with open(legacy, "w", encoding="utf-8") as f:
+        with open(os.path.join(CACHE_DIR, "report_cache.json"), "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
 
     return report
 
 
 def load_report(date_preset="last_7d"):
+    """Carrega cache do período. Retorna None se não existir."""
     path = _cache_path(date_preset)
-    # Fallback para o arquivo legado no caso de last_7d
     if not os.path.exists(path) and date_preset == "last_7d":
         path = os.path.join(CACHE_DIR, "report_cache.json")
     if not os.path.exists(path):
-        return None
-    # Cache expirado (> 30 min) retorna None para forçar nova busca
-    age = datetime.datetime.now().timestamp() - os.path.getmtime(path)
-    if age > CACHE_TTL:
         return None
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
