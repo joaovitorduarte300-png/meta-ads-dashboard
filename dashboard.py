@@ -241,16 +241,23 @@ if not report:
             report = fetch_report(date_preset)
             st.session_state[_cache_key] = report
         except Exception as e:
-            st.error(f"❌ Erro ao buscar dados da API:")
-            st.code(str(e))
-            # Diagnóstico rápido: mostra a resposta bruta da API de contas
-            with st.expander("🔍 Diagnóstico da API"):
-                try:
-                    accs, raw = get_accounts()
-                    st.write(f"**Contas encontradas:** {len(accs)}")
-                    st.json(raw)
-                except Exception as e2:
-                    st.write(f"Falha no diagnóstico: {e2}")
+            msg = str(e)
+            if "80004" in msg or "too many calls" in msg.lower() or "rate" in msg.lower():
+                st.warning(
+                    "⏳ **Limite de requisições da Meta atingido.**\n\n"
+                    "A API do Meta bloqueia temporariamente quando há muitas chamadas seguidas. "
+                    "Aguarde **2 a 5 minutos** e clique em **Atualizar** novamente."
+                )
+            else:
+                st.error("❌ Erro ao buscar dados da API:")
+                st.code(msg)
+                with st.expander("🔍 Diagnóstico da API"):
+                    try:
+                        accs, raw = get_accounts()
+                        st.write(f"**Contas encontradas:** {len(accs)}")
+                        st.json(raw)
+                    except Exception as e2:
+                        st.write(f"Falha no diagnóstico: {e2}")
             st.stop()
 
 if not report or not report.get("contas"):

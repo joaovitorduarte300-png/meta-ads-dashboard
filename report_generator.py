@@ -23,7 +23,10 @@ def _cache_path(date_preset):
     return os.path.join(CACHE_DIR, f"report_cache_{date_preset}.json")
 
 
-def _get(endpoint, params=None):
+RATE_LIMIT_CODES = {4, 17, 32, 80000, 80001, 80002, 80003, 80004}
+
+def _get(endpoint, params=None, _retry=0):
+    import time
     url = f"{BASE_URL}/{endpoint.lstrip('/')}"
     p = {"access_token": ACCESS_TOKEN}
     if params:
@@ -35,11 +38,17 @@ def _get(endpoint, params=None):
         raise RuntimeError(f"Timeout ao chamar '{endpoint}'")
     except Exception as e:
         raise RuntimeError(f"Erro de rede em '{endpoint}': {e}")
+
     if "error" in data:
-        err = data["error"]
-        raise RuntimeError(
-            f"Meta API erro {err.get('code','?')} em '{endpoint}': {err.get('message', err)}"
-        )
+        err  = data["error"]
+        code = err.get("code", 0)
+        msg  = err.get("message", str(err))
+        # Rate limit: tenta de novo com espera crescente (máx 3x)
+        if code in RATE_LIMIT_CODES and _retry < 3:
+            wait = [15, 30, 60][_retry]
+            time.sleep(wait)
+            return _get(endpoint, params, _retry + 1)
+        raise RuntimeError(f"Meta API erro {code}: {msg}")
     return data
 
 
